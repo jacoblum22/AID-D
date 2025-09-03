@@ -1,3 +1,6 @@
 /.vscode
 /latent_rpg_env
 /__pycache__
+config.py
+*.log
+.env
