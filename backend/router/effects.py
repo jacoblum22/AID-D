@@ -31,25 +31,28 @@ def apply_hp(state: GameState, e: Dict[str, Any]) -> None:
     target_id = e["target"]
     delta = e["delta"]
 
-    if target_id in state.entities:
-        entity: Entity = state.entities[target_id]
+    # Fail fast on unknown HP target
+    if target_id not in state.entities:
+        raise ValueError(f"HP effect target not found: {target_id}")
 
-        # Type-safe check for living entities
-        if entity.type not in ("pc", "npc"):
-            raise ValueError(f"hp effect on non-creature: {entity.type}")
+    entity: Entity = state.entities[target_id]
 
-        # Type cast for static analysis
-        living_entity: Union[PC, NPC] = cast(Union[PC, NPC], entity)
+    # Type-safe check for living entities
+    if entity.type not in ("pc", "npc"):
+        raise ValueError(f"hp effect on non-creature: {entity.type}")
 
-        # Calculate new HP
-        new_hp = max(0, living_entity.hp.current + delta)
+    # Type cast for static analysis
+    living_entity: Union[PC, NPC] = cast(Union[PC, NPC], entity)
 
-        # Create new HP object and update entity
-        from .game_state import HP
+    # Calculate new HP with both lower and upper bounds clamped
+    new_hp = max(0, min(living_entity.hp.max, living_entity.hp.current + delta))
 
-        new_hp_obj = HP(current=new_hp, max=living_entity.hp.max)
-        updated_entity = living_entity.model_copy(update={"hp": new_hp_obj})
-        state.entities[target_id] = updated_entity
+    # Create new HP object and update entity
+    from .game_state import HP
+
+    new_hp_obj = HP(current=new_hp, max=living_entity.hp.max)
+    updated_entity = living_entity.model_copy(update={"hp": new_hp_obj})
+    state.entities[target_id] = updated_entity
 
 
 @effect("position")

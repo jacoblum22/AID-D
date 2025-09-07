@@ -78,21 +78,35 @@ def test_planner_integration():
         sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
         import config
 
-        if config.OPENAI_API_KEY == "your-api-key-here":
+        # Secure API key validation - avoid hardcoded comparisons and exposure
+        if not config.OPENAI_API_KEY or len(config.OPENAI_API_KEY.strip()) == 0:
             print("❌ API key not configured!")
-            print("Please edit config.py and add your OpenAI API key.")
+            print("Please set the OPENAI_API_KEY environment variable.")
+            return 0, 0
+        
+        # Check for template/placeholder values without exposing the actual key
+        if config.OPENAI_API_KEY.strip() in ["your-api-key-here", "sk-...", ""]:
+            print("❌ API key appears to be a placeholder!")
+            print("Please set a valid OpenAI API key in your environment variables.")
             return 0, 0
 
         # Initialize planner
         initialize_planner(config.OPENAI_API_KEY, config.OPENAI_MODEL)
         print("✅ Planner initialized with OpenAI API")
 
-    except ImportError:
-        print("❌ Config file not found or API key not set")
-        print("Please make sure config.py exists with your OpenAI API key")
+    except ImportError as e:
+        print("❌ Config file not found")
+        print("Please make sure config.py exists and OPENAI_API_KEY is set")
+        return 0, 0
+    except AttributeError as e:
+        print("❌ API key configuration missing")
+        print("Please ensure OPENAI_API_KEY is defined in config.py")
+        return 0, 0
+    except ValueError as e:
+        print(f"❌ Configuration error: {e}")
         return 0, 0
     except Exception as e:
-        print(f"❌ Error initializing planner: {e}")
+        print(f"❌ Error initializing planner: {type(e).__name__}")
         return 0, 0
 
     state = create_demo_state()
@@ -159,7 +173,13 @@ def test_planner_integration():
     print(f"Total scenarios: {total_tests}")
     print(f"Successful plans: {successful_tests}")
     print(f"Failed/Fallback plans: {failed_tests}")
-    print(f"Success rate: {(successful_tests/total_tests)*100:.1f}%")
+    
+    # Handle division by zero edge case
+    if total_tests == 0:
+        print("Success rate: N/A (no tests executed)")
+    else:
+        success_rate = (successful_tests / total_tests) * 100
+        print(f"Success rate: {success_rate:.1f}%")
 
     return successful_tests, failed_tests
 

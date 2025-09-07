@@ -23,6 +23,7 @@ from .effects import apply_effects
 
 
 # Set up logging
+# TODO: Move logging configuration to application entry point to avoid conflicts
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -101,12 +102,12 @@ class Validator:
                 )
 
             # Step 2: Schema validation
+            schema_ok = False  # Initialize before try block
             try:
                 validated_args = tool.args_schema(**raw_args)
                 schema_ok = True
                 sanitized_args = validated_args.dict()
             except ValidationError as e:
-                schema_ok = False
                 return self._create_error_result(
                     tool_id, raw_args, f"Schema validation failed: {e}", log_entry
                 )
@@ -153,7 +154,7 @@ class Validator:
             log_entry["result"] = result.to_dict()
             log_entry["state"] = self._get_state_summary(state)
 
-            print(f"INFO: {json.dumps(log_entry)}")
+            logger.info(json.dumps(log_entry))
 
             return result
 
@@ -279,8 +280,27 @@ class Validator:
         # Roll dice: d20 + sum(effective_style × domain dice)
         d20_roll = random.randint(1, 20)
 
-        # Parse domain die size
-        domain_size = int(domain[1:])  # "d6" -> 6
+        # Parse domain die size with defensive error handling
+        try:
+            if not domain.startswith("d") or not domain[1:].isdigit():
+                raise ValueError(f"Invalid domain format: {domain}")
+            domain_size = int(domain[1:])  # "d6" -> 6
+        except (ValueError, IndexError) as e:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"I don't understand the dice format '{domain}'. Please use format like 'd6' or 'd20'."
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to invalid dice format",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Invalid domain format: {domain}",
+            )
         style_dice = [random.randint(1, domain_size) for _ in range(effective_style)]
         style_sum = sum(style_dice)
         total = d20_roll + style_sum
@@ -430,7 +450,7 @@ class Validator:
                 {
                     "type": "clock",
                     "id": "scene.alarm",
-                    "delta": 2 if outcome == "crit_fail" else 2,
+                    "delta": 3 if outcome == "crit_fail" else 2,
                 }
             )
 
@@ -710,7 +730,7 @@ class Validator:
     ) -> ToolResult:
         """Create an error result with ask_clarifying fallback."""
         log_entry["result"] = {"ok": False, "error": error_msg}
-        print(f"ERROR: {json.dumps(log_entry)}")
+        logger.error(json.dumps(log_entry))
 
         return ToolResult(
             ok=False,

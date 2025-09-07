@@ -2,8 +2,9 @@
 Core data structures for the AI D&D game state and utterances.
 """
 
+import re
 from typing import Dict, List, Optional, Any, Union, Literal, Annotated, cast
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from enum import Enum
 
 
@@ -48,13 +49,13 @@ class PC(BaseEntity):
     """Player character entity."""
 
     type: Literal["pc"]
-    stats: Stats = Stats()
-    hp: HP = HP(current=20, max=20)
-    visible_actors: List[str] = []
+    stats: Stats = Field(default_factory=Stats)
+    hp: HP = Field(default_factory=lambda: HP(current=20, max=20))
+    visible_actors: List[str] = Field(default_factory=list)
     has_weapon: bool = True
     has_talked_this_turn: bool = False
-    inventory: List[str] = []
-    conditions: Dict[str, bool] = {}
+    inventory: List[str] = Field(default_factory=list)
+    conditions: Dict[str, bool] = Field(default_factory=dict)
 
     # Combat and effect fields
     guard: int = 0
@@ -67,13 +68,13 @@ class NPC(BaseEntity):
     """Non-player character entity."""
 
     type: Literal["npc"]
-    stats: Stats = Stats()
-    hp: HP = HP(current=20, max=20)
-    visible_actors: List[str] = []
+    stats: Stats = Field(default_factory=Stats)
+    hp: HP = Field(default_factory=lambda: HP(current=20, max=20))
+    visible_actors: List[str] = Field(default_factory=list)
     has_weapon: bool = True
     has_talked_this_turn: bool = False
-    inventory: List[str] = []
-    conditions: Dict[str, bool] = {}
+    inventory: List[str] = Field(default_factory=list)
+    conditions: Dict[str, bool] = Field(default_factory=dict)
 
     # Combat and effect fields
     guard: int = 0
@@ -110,17 +111,19 @@ class Scene(BaseModel):
     """Scene tracking for turn order and environmental conditions."""
 
     id: str = "default_scene"
-    turn_order: List[str] = []
+    turn_order: List[str] = Field(default_factory=list)
     turn_index: int = 0
     round: int = 1
     base_dc: int = 12
-    tags: Dict[str, str] = {
-        "alert": "normal",  # sleepy | normal | wary | alarmed
-        "lighting": "normal",  # dim | normal | bright
-        "noise": "normal",  # quiet | normal | loud
-        "cover": "some",  # none | some | good
-    }
-    objective: Dict[str, Any] = {}
+    tags: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "alert": "normal",  # sleepy | normal | wary | alarmed
+            "lighting": "normal",  # dim | normal | bright
+            "noise": "normal",  # quiet | normal | loud
+            "cover": "some",  # none | some | good
+        }
+    )
+    objective: Dict[str, Any] = Field(default_factory=dict)
 
 
 class GameState(BaseModel):
@@ -128,11 +131,11 @@ class GameState(BaseModel):
 
     entities: Dict[str, Entity]  # Changed from actors to entities
     zones: Dict[str, Zone]
-    scene: Scene = Scene()
+    scene: Scene = Field(default_factory=Scene)
     pending_action: Optional[str] = None
     current_actor: Optional[str] = None
-    turn_flags: Dict[str, Any] = {}
-    clocks: Dict[str, Dict[str, Any]] = {}
+    turn_flags: Dict[str, Any] = Field(default_factory=dict)
+    clocks: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
 
     # Backward compatibility property
     @property
@@ -148,7 +151,7 @@ class Utterance(BaseModel):
     text: str
     actor_id: str
     detected_intent: Optional[str] = None
-    actionable_verbs: List[str] = []
+    actionable_verbs: List[str] = Field(default_factory=list)
 
     def has_actionable_verb(self) -> bool:
         """Check if utterance contains actionable verbs like move, attack, talk, etc."""

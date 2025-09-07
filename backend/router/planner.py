@@ -248,10 +248,18 @@ Choose the most appropriate tool and return JSON only."""
                 )
 
             # Get the candidate to merge with suggested args
-            chosen_candidate = next(c for c in candidates if c.id == chosen_tool)
+            chosen_candidate = next((c for c in candidates if c.id == chosen_tool), None)
+            if chosen_candidate is None:
+                raise ValueError(
+                    f"Internal error: chosen tool {chosen_tool} not found in candidates"
+                )
 
             # Merge LLM args with suggested args (LLM args take precedence)
-            final_args = chosen_candidate.args_hint.copy()
+            # Ensure args_hint exists before copying
+            if chosen_candidate.args_hint is not None:
+                final_args = chosen_candidate.args_hint.copy()
+            else:
+                final_args = {}
             final_args.update(args)
 
             # Clamp confidence to valid range

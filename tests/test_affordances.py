@@ -108,6 +108,16 @@ def test_affordance_filter():
         # Get candidates from affordance filter
         candidates = get_tool_candidates(state, utterance)
 
+        # Add minimal assertions to prevent false positives
+        assert candidates is not None, "get_tool_candidates should not return None"
+        assert len(candidates) > 0, f"Should return at least one candidate for utterance: '{utterance_text}'"
+        
+        # Basic sanity checks
+        for candidate in candidates:
+            assert hasattr(candidate, 'id'), "Candidate should have an id"
+            assert hasattr(candidate, 'confidence'), "Candidate should have confidence"
+            assert 0 <= candidate.confidence <= 1, f"Confidence should be 0-1, got {candidate.confidence}"
+
         print(f"Tool candidates ({len(candidates)}):")
         for i, candidate in enumerate(candidates, 1):
             print(f"  {i}. {candidate.id} (confidence: {candidate.confidence:.2f})")
@@ -132,7 +142,8 @@ def test_enrichment_details():
 
     ask_roll_candidate = next((c for c in candidates if c.id == "ask_roll"), None)
     if ask_roll_candidate:
-        print(f"   Base DC would be 12, enriched: {ask_roll_candidate.args_hint}")
+        args_hint = ask_roll_candidate.args_hint or {}
+        print(f"   Base DC would be 12, enriched: {args_hint}")
 
     # Test message extraction
     print("\n2. Testing message extraction:")
@@ -144,8 +155,9 @@ def test_enrichment_details():
 
     talk_candidate = next((c for c in candidates if c.id == "talk"), None)
     if talk_candidate:
+        args_hint = talk_candidate.args_hint or {}
         print(
-            f"   Extracted message: {talk_candidate.args_hint.get('message', 'None')}"
+            f"   Extracted message: {args_hint.get('message', 'None')}"
         )
 
     # Test movement style detection
@@ -155,8 +167,9 @@ def test_enrichment_details():
 
     move_candidate = next((c for c in candidates if c.id == "move"), None)
     if move_candidate:
+        args_hint = move_candidate.args_hint or {}
         print(
-            f"   Movement style: {move_candidate.args_hint.get('movement_style', 'None')}"
+            f"   Movement style: {args_hint.get('movement_style', 'None')}"
         )
 
     # Test clarifying question generation
@@ -166,8 +179,9 @@ def test_enrichment_details():
 
     clarify_candidate = next((c for c in candidates if c.id == "ask_clarifying"), None)
     if clarify_candidate:
+        args_hint = clarify_candidate.args_hint or {}
         print(
-            f"   Generated question: {clarify_candidate.args_hint.get('question', 'None')}"
+            f"   Generated question: {args_hint.get('question', 'None')}"
         )
 
 
@@ -185,6 +199,12 @@ def test_confidence_ranking():
     print("\nFor clear attack intent, confidence ranking:")
     for i, candidate in enumerate(candidates[:5], 1):  # Top 5
         print(f"  {i}. {candidate.id}: {candidate.confidence:.2f}")
+    
+    # Assert confidence ordering (non-increasing)
+    assert len(candidates) > 0, "Should have candidates for clear attack intent"
+    for i in range(len(candidates) - 1):
+        assert candidates[i].confidence >= candidates[i + 1].confidence, \
+            f"Confidence should be non-increasing: {candidates[i].confidence} >= {candidates[i + 1].confidence}"
 
     # Ambiguous utterance
     utterance = Utterance(text="I do something", actor_id="pc.arin")
@@ -193,6 +213,21 @@ def test_confidence_ranking():
     print("\nFor ambiguous intent, confidence ranking:")
     for i, candidate in enumerate(candidates[:5], 1):  # Top 5
         print(f"  {i}. {candidate.id}: {candidate.confidence:.2f}")
+    
+    # Assert confidence ordering for ambiguous case
+    assert len(candidates) > 0, "Should have candidates for ambiguous utterance"
+    for i in range(len(candidates) - 1):
+        assert candidates[i].confidence >= candidates[i + 1].confidence, \
+            f"Confidence should be non-increasing: {candidates[i].confidence} >= {candidates[i + 1].confidence}"
+    
+    # Assert that ask_clarifying appears for ambiguous text
+    clarifying_candidates = [c for c in candidates if c.id == "ask_clarifying"]
+    assert len(clarifying_candidates) > 0, "ask_clarifying should appear for ambiguous utterances"
+    
+    # Assert that ask_clarifying has reasonable confidence for ambiguous text
+    clarifying_candidate = clarifying_candidates[0]
+    assert clarifying_candidate.confidence >= 0.3, \
+        f"ask_clarifying should have decent confidence for ambiguous text, got {clarifying_candidate.confidence}"
 
 
 if __name__ == "__main__":

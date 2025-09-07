@@ -7,6 +7,25 @@ Each tool has:
 - precond: function that checks if tool is available given state and utterance
 - suggest_args: optional function to provide default arguments
 - schema: JSON schema for argument validation
+
+=== TOOL IMPLEMENTATION STATUS ===
+✅ FULLY IMPLEMENTED:
+- ask_roll: Complete dice mechanics with Style+Domain system, DC derivation,
+           effect generation, and comprehensive validation pipeline
+
+🚧 PLACEHOLDER IMPLEMENTATIONS:
+- move: Basic zone transitions (minimal implementation)
+- attack: Simple combat mechanics (placeholder)
+- talk: Basic social interactions (placeholder)
+- use_item: Basic item usage (placeholder)
+- narrate_only: Scene narration (escape hatch)
+- get_info: State querying (basic implementation)
+- apply_effects: Direct effect application (utility)
+- ask_clarifying: Clarification requests (escape hatch)
+
+The placeholder tools provide basic functionality for testing and integration
+but lack the sophisticated mechanics that ask_roll has. They will be enhanced
+in future development phases.
 """
 
 from typing import Dict, List, Optional, Any, Callable, Union, Literal, Annotated
@@ -161,12 +180,19 @@ def attack_precond(state, utterance) -> bool:
 
 
 def talk_precond(state, utterance) -> bool:
-    """talk always available but capped by 'already talked this turn' flag."""
+    """talk available when there's a current actor who hasn't talked this turn."""
     if not state.current_actor:
-        return True  # Default to available
+        return False  # No talk without current actor
 
     current_actor = state.actors.get(state.current_actor)
-    return not (current_actor and current_actor.has_talked_this_turn)
+    if not current_actor:
+        return False
+
+    # Check if actor has already talked this turn
+    return not (
+        hasattr(current_actor, "has_talked_this_turn")
+        and current_actor.has_talked_this_turn
+    )
 
 
 def use_item_precond(state, utterance) -> bool:
@@ -175,7 +201,14 @@ def use_item_precond(state, utterance) -> bool:
         return False
 
     current_actor = state.actors.get(state.current_actor)
-    return current_actor and len(current_actor.inventory) > 0
+    if not current_actor:
+        return False
+
+    # Defensive check for inventory attribute
+    if not hasattr(current_actor, "inventory"):
+        return False
+
+    return len(current_actor.inventory) > 0
 
 
 def narrate_only_precond(state, utterance) -> bool:
@@ -210,11 +243,11 @@ def suggest_ask_roll_args(state, utterance) -> Dict[str, Any]:
     # Try to detect action from utterance
     action_map = {
         "sneak": ("sneak", 12),
-        "hide": ("hide", 10),
+        "hide": ("sneak", 10),  # "hide" maps to "sneak" action
         "persuade": ("persuade", 13),
-        "intimidate": ("intimidate", 14),
-        "search": ("search", 11),
-        "climb": ("climb", 12),
+        "intimidate": ("persuade", 14),  # "intimidate" also maps to "persuade"
+        "search": ("athletics", 11),  # "search" maps to "athletics"
+        "climb": ("athletics", 12),  # "climb" maps to "athletics"
     }
 
     text_lower = utterance.text.lower()
@@ -268,7 +301,79 @@ def suggest_move_args(state, utterance) -> Dict[str, Any]:
     return args
 
 
+def suggest_attack_args(state, utterance) -> Dict[str, Any]:
+    """Suggest arguments for attack tool with safe actor access."""
+    args = {}
+
+    if state.current_actor:
+        args["actor"] = state.current_actor
+        current_actor = state.actors.get(state.current_actor)
+
+        if (
+            current_actor
+            and hasattr(current_actor, "visible_actors")
+            and current_actor.visible_actors
+        ):
+            args["target"] = current_actor.visible_actors[0]
+        else:
+            args["target"] = None
+    else:
+        args["actor"] = None
+        args["target"] = None
+
+    return args
+
+
+def suggest_use_item_args(state, utterance) -> Dict[str, Any]:
+    """Suggest arguments for use_item tool with safe actor access."""
+    args = {}
+
+    if state.current_actor:
+        args["actor"] = state.current_actor
+        current_actor = state.actors.get(state.current_actor)
+
+        if (
+            current_actor
+            and hasattr(current_actor, "inventory")
+            and current_actor.inventory
+        ):
+            args["item"] = current_actor.inventory[0]
+        else:
+            args["item"] = None
+    else:
+        args["actor"] = None
+        args["item"] = None
+
+    return args
+
+
 def suggest_talk_args(state, utterance) -> Dict[str, Any]:
+    """Suggest arguments for talk based on visible actors."""
+    args = {}
+
+    if state.current_actor:
+        args["actor"] = state.current_actor
+        current_actor = state.actors.get(state.current_actor)
+
+        if (
+            current_actor
+            and hasattr(current_actor, "visible_actors")
+            and current_actor.visible_actors
+        ):
+            args["target"] = current_actor.visible_actors[0]
+
+        # Detect tone from utterance
+        text_lower = utterance.text.lower()
+        if any(word in text_lower for word in ["angry", "shout", "yell"]):
+            args["tone"] = "aggressive"
+        elif any(word in text_lower for word in ["whisper", "quiet", "soft"]):
+            args["tone"] = "calm"
+        elif any(word in text_lower for word in ["friendly", "smile", "kind"]):
+            args["tone"] = "friendly"
+        else:
+            args["tone"] = "neutral"
+
+    return args
     """Suggest arguments for talk based on visible actors."""
     args = {}
 
@@ -341,17 +446,7 @@ TOOL_CATALOG: List[Tool] = [
         id="attack",
         desc="Engage in combat with a visible enemy.",
         precond=attack_precond,
-        suggest_args=lambda state, utterance: {
-            "actor": state.current_actor,
-            "target": (
-                state.actors[state.current_actor].visible_actors[0]
-                if state.current_actor
-                and state.actors.get(state.current_actor)
-                and hasattr(state.actors[state.current_actor], "visible_actors")
-                and state.actors[state.current_actor].visible_actors
-                else None
-            ),
-        },
+        suggest_args=suggest_attack_args,
         args_schema=AttackArgs,
     ),
     Tool(
@@ -365,16 +460,7 @@ TOOL_CATALOG: List[Tool] = [
         id="use_item",
         desc="Use an item from your inventory.",
         precond=use_item_precond,
-        suggest_args=lambda state, utterance: {
-            "actor": state.current_actor,
-            "item": (
-                state.actors[state.current_actor].inventory[0]
-                if state.current_actor
-                and state.actors.get(state.current_actor)
-                and state.actors[state.current_actor].inventory
-                else None
-            ),
-        },
+        suggest_args=suggest_use_item_args,
         args_schema=UseItemArgs,
     ),
     Tool(

@@ -124,7 +124,7 @@ class AffordanceFilter:
             if current_actor:
                 # If targeting a guard, check if they might be sleepy/distracted
                 target_id = enriched.get("target")
-                if target_id and "guard" in target_id.lower():
+                if target_id and "guard" in str(target_id).lower():
                     # Example: sleepy guard is easier to sneak past
                     if enriched.get("action") == "sneak":
                         enriched["dc_hint"] = max(8, base_dc - 3)  # Easier DC
@@ -257,9 +257,13 @@ class AffordanceFilter:
 
             # Movement ambiguity
             elif any(word in text_lower for word in ["go", "move"]) and current_zone:
-                adjacent_names = [
-                    state.zones[z_id].name for z_id in current_zone.adjacent_zones
-                ]
+                # Safely resolve adjacent zone names, filtering out any that don't exist
+                adjacent_names = []
+                for z_id in current_zone.adjacent_zones:
+                    zone = state.zones.get(z_id)
+                    if zone is not None:
+                        adjacent_names.append(zone.name)
+                
                 if len(adjacent_names) > 1:
                     enriched["question"] = (
                         f"Where to? You can go to: {', '.join(adjacent_names)}"
