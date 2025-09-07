@@ -1,6 +1,46 @@
+# IDE and Editor files
 /.vscode
+
+# Python Virtual Environment
 /latent_rpg_env
-/__pycache__
+
+# Python Cache and Compiled files
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+
+# Configuration and Environment
 config.py
+.env*
+
+# Logs
 *.log
-.env
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Package files
+*.egg-info/
+dist/
+build/
