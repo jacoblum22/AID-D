@@ -263,7 +263,7 @@ class AffordanceFilter:
                     zone = state.zones.get(z_id)
                     if zone is not None:
                         adjacent_names.append(zone.name)
-                
+
                 if len(adjacent_names) > 1:
                     enriched["question"] = (
                         f"Where to? You can go to: {', '.join(adjacent_names)}"

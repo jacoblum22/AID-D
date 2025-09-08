@@ -68,7 +68,7 @@ def create_demo_state() -> GameState:
 
 def test_tool_preconditions(verbose=True, filter_working_only=True):
     """Test the precondition system with various scenarios.
-    
+
     Args:
         verbose: If True, print detailed output
         filter_working_only: If True, only test tools that are fully implemented
@@ -87,18 +87,30 @@ def test_tool_preconditions(verbose=True, filter_working_only=True):
         ("I talk to the guard", "Social interaction", ["talk"]),
         ("I use my rope", "Item usage", ["use_item"]),
         ("What's in this room?", "Information query", ["get_info"]),
-        ("I cast a fireball", "Invalid action (should show fallbacks)", ["ask_clarifying", "narrate_only"]),
+        (
+            "I cast a fireball",
+            "Invalid action (should show fallbacks)",
+            ["ask_clarifying", "narrate_only"],
+        ),
     ]
 
     # Filter scenarios based on working tools if requested
-    working_tools = {"ask_roll", "ask_clarifying", "narrate_only"}  # Add more as they're implemented
-    
+    working_tools = {
+        "ask_roll",
+        "ask_clarifying",
+        "narrate_only",
+    }  # Add more as they're implemented
+
     scenarios = []
     for utterance_text, scenario_desc, expected_tools in all_scenarios:
-        if not filter_working_only or any(tool in working_tools for tool in expected_tools):
+        if not filter_working_only or any(
+            tool in working_tools for tool in expected_tools
+        ):
             scenarios.append((utterance_text, scenario_desc, expected_tools))
         elif verbose:
-            print(f"⏭️  Skipping scenario '{scenario_desc}' - tools not fully implemented yet")
+            print(
+                f"⏭️  Skipping scenario '{scenario_desc}' - tools not fully implemented yet"
+            )
 
     for utterance_text, scenario_desc, expected_tools in scenarios:
         if verbose:
@@ -111,7 +123,7 @@ def test_tool_preconditions(verbose=True, filter_working_only=True):
         # Check which tools have their preconditions satisfied
         available_tools = []
         error_count = 0
-        
+
         for tool in TOOL_CATALOG:
             try:
                 if tool.precond(state, utterance):
@@ -142,15 +154,17 @@ def test_tool_preconditions(verbose=True, filter_working_only=True):
                 print(f"  {i}. {tool['id']}: {tool['desc']}")
                 if tool["suggested_args"]:
                     print(f"     Suggested args: {tool['suggested_args']}")
-            
+
             if error_count > 0:
-                print(f"  ⚠️  {error_count} tools had errors (likely not fully implemented)")
-        
+                print(
+                    f"  ⚠️  {error_count} tools had errors (likely not fully implemented)"
+                )
+
         # Check if expected tools are present
         found_tools = {tool["id"] for tool in available_tools}
         missing_expected = set(expected_tools) - found_tools
         unexpected_tools = found_tools - set(expected_tools)
-        
+
         if verbose and (missing_expected or unexpected_tools):
             if missing_expected:
                 print(f"  ⚠️  Expected but missing: {', '.join(missing_expected)}")
@@ -159,13 +173,13 @@ def test_tool_preconditions(verbose=True, filter_working_only=True):
 
         if verbose:
             print("-" * 50)
-    
+
     return len(scenarios)
 
 
 def test_specific_tool(tool_id="ask_roll", verbose=True):
     """Test a specific tool's functionality.
-    
+
     Args:
         tool_id: ID of the tool to test
         verbose: If True, print detailed output
@@ -200,7 +214,7 @@ def test_specific_tool(tool_id="ask_roll", verbose=True):
                     print(f"Suggested arguments: {suggested_args}")
 
                 # Try to create args object if schema is available
-                if hasattr(target_tool, 'args_schema') and target_tool.args_schema:
+                if hasattr(target_tool, "args_schema") and target_tool.args_schema:
                     try:
                         args_obj = target_tool.args_schema(**suggested_args)
                         if verbose:
@@ -226,7 +240,7 @@ def test_specific_tool(tool_id="ask_roll", verbose=True):
             if verbose:
                 print("ℹ️  Tool precondition not satisfied for this scenario")
             return True  # Not an error, just not applicable
-            
+
     except Exception as e:
         if verbose:
             print(f"❌ Error testing tool: {e}")
@@ -235,28 +249,36 @@ def test_specific_tool(tool_id="ask_roll", verbose=True):
 
 if __name__ == "__main__":
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Demo the Tool Catalog system")
-    parser.add_argument("--all-tools", action="store_true", 
-                       help="Test all tools, even unimplemented ones")
-    parser.add_argument("--tool", type=str, default="ask_roll",
-                       help="Specific tool to test in detail (default: ask_roll)")
-    parser.add_argument("--quiet", action="store_true",
-                       help="Reduce output verbosity")
-    
+    parser.add_argument(
+        "--all-tools",
+        action="store_true",
+        help="Test all tools, even unimplemented ones",
+    )
+    parser.add_argument(
+        "--tool",
+        type=str,
+        default="ask_roll",
+        help="Specific tool to test in detail (default: ask_roll)",
+    )
+    parser.add_argument("--quiet", action="store_true", help="Reduce output verbosity")
+
     args = parser.parse_args()
-    
+
     try:
         # Configure demo based on arguments
         verbose = not args.quiet
         filter_working = not args.all_tools
-        
+
         # Run main tool catalog test
-        scenario_count = test_tool_preconditions(verbose=verbose, filter_working_only=filter_working)
-        
+        scenario_count = test_tool_preconditions(
+            verbose=verbose, filter_working_only=filter_working
+        )
+
         # Test specific tool
         tool_success = test_specific_tool(tool_id=args.tool, verbose=verbose)
-        
+
         if verbose:
             print("\n✅ Tool Catalog Step 1 implementation complete!")
             print("Key features demonstrated:")
@@ -266,12 +288,13 @@ if __name__ == "__main__":
             print(f"- Tested {scenario_count} scenarios")
             if filter_working:
                 print("- Filtered to working tools only (use --all-tools to test all)")
-        
+
         # Exit with appropriate code
         exit(0 if tool_success else 1)
 
     except Exception as e:
         print(f"❌ Error in demo: {e}")
         import traceback
+
         traceback.print_exc()
         exit(1)

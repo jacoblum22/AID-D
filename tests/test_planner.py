@@ -83,7 +83,7 @@ def test_planner_integration():
             print("❌ API key not configured!")
             print("Please set the OPENAI_API_KEY environment variable.")
             return 0, 0
-        
+
         # Check for template/placeholder values without exposing the actual key
         if config.OPENAI_API_KEY.strip() in ["your-api-key-here", "sk-...", ""]:
             print("❌ API key appears to be a placeholder!")
@@ -173,7 +173,7 @@ def test_planner_integration():
     print(f"Total scenarios: {total_tests}")
     print(f"Successful plans: {successful_tests}")
     print(f"Failed/Fallback plans: {failed_tests}")
-    
+
     # Handle division by zero edge case
     if total_tests == 0:
         print("Success rate: N/A (no tests executed)")

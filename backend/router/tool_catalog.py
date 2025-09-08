@@ -374,32 +374,6 @@ def suggest_talk_args(state, utterance) -> Dict[str, Any]:
             args["tone"] = "neutral"
 
     return args
-    """Suggest arguments for talk based on visible actors."""
-    args = {}
-
-    if state.current_actor:
-        args["actor"] = state.current_actor
-        current_actor = state.actors.get(state.current_actor)
-
-        if (
-            current_actor
-            and hasattr(current_actor, "visible_actors")
-            and current_actor.visible_actors
-        ):
-            args["target"] = current_actor.visible_actors[0]
-
-        # Detect tone from utterance
-        text_lower = utterance.text.lower()
-        if any(word in text_lower for word in ["angry", "shout", "yell"]):
-            args["tone"] = "aggressive"
-        elif any(word in text_lower for word in ["whisper", "quiet", "soft"]):
-            args["tone"] = "calm"
-        elif any(word in text_lower for word in ["friendly", "smile", "kind"]):
-            args["tone"] = "friendly"
-        else:
-            args["tone"] = "neutral"
-
-    return args
 
 
 # Tool catalog definition

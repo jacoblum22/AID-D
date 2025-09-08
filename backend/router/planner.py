@@ -248,7 +248,9 @@ Choose the most appropriate tool and return JSON only."""
                 )
 
             # Get the candidate to merge with suggested args
-            chosen_candidate = next((c for c in candidates if c.id == chosen_tool), None)
+            chosen_candidate = next(
+                (c for c in candidates if c.id == chosen_tool), None
+            )
             if chosen_candidate is None:
                 raise ValueError(
                     f"Internal error: chosen tool {chosen_tool} not found in candidates"
