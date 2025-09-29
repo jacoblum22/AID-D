@@ -102,6 +102,8 @@ class AffordanceFilter:
             enriched = self._enrich_attack_args(enriched, state, utterance)
         elif tool.id == "talk":
             enriched = self._enrich_talk_args(enriched, state, utterance)
+        elif tool.id == "narrate_only":
+            enriched = self._enrich_narrate_only_args(enriched, state, utterance)
         elif tool.id == "ask_clarifying":
             enriched = self._enrich_clarifying_args(enriched, state, utterance)
 
@@ -222,6 +224,42 @@ class AffordanceFilter:
                     enriched["relationship"] = "authority_figure"
                 elif hasattr(target_actor, "type") and target_actor.type == "npc":
                     enriched["relationship"] = "stranger"
+
+        return enriched
+
+    def _enrich_narrate_only_args(
+        self, args: Dict[str, Any], state: GameState, utterance: Utterance
+    ) -> Dict[str, Any]:
+        """Enrich narrate_only arguments with context-aware topic refinement."""
+        enriched = args.copy()
+
+        # If topic is not already set or is generic, try to refine it based on context
+        current_topic = enriched.get("topic", "look around")
+
+        # Context-aware topic refinement
+        if current_topic == "look around":
+            # Check if there are specific things to focus on
+            current_actor = (
+                state.actors.get(state.current_actor) if state.current_actor else None
+            )
+            if (
+                current_actor
+                and hasattr(current_actor, "visible_actors")
+                and current_actor.visible_actors
+            ):
+                # If only one visible entity, might want to zoom in
+                if len(current_actor.visible_actors) == 1:
+                    entity_id = current_actor.visible_actors[0]
+                    entity = state.actors.get(entity_id)
+                    if entity and hasattr(entity, "name"):
+                        # Check if utterance mentions this entity specifically
+                        if entity.name.lower() in utterance.text.lower():
+                            enriched["topic"] = f"zoom_in:{entity_id}"
+
+        # Add contextual hints for better narration
+        if state.scene:
+            scene_tags = getattr(state.scene, "tags", {})
+            enriched["scene_context"] = scene_tags
 
         return enriched
 

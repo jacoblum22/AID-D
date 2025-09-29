@@ -48,7 +48,7 @@ class BaseEntity(BaseModel):
 class PC(BaseEntity):
     """Player character entity."""
 
-    type: Literal["pc"]
+    type: Literal["pc"] = Field(default="pc")
     stats: Stats = Field(default_factory=Stats)
     hp: HP = Field(default_factory=lambda: HP(current=20, max=20))
     visible_actors: List[str] = Field(default_factory=list)
@@ -67,7 +67,7 @@ class PC(BaseEntity):
 class NPC(BaseEntity):
     """Non-player character entity."""
 
-    type: Literal["npc"]
+    type: Literal["npc"] = Field(default="npc")
     stats: Stats = Field(default_factory=Stats)
     hp: HP = Field(default_factory=lambda: HP(current=20, max=20))
     visible_actors: List[str] = Field(default_factory=list)
