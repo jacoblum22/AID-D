@@ -677,9 +677,12 @@ class Validator:
 
         # Determine POV and current zone
         pov_actor = state.actors.get(actor_id) if actor_id else None
-        current_zone_id = pov_actor.current_zone if pov_actor else None
+        current_zone_id = (
+            pov_actor.current_zone
+            if pov_actor and hasattr(pov_actor, "current_zone")
+            else None
+        )
         current_zone = state.zones.get(current_zone_id) if current_zone_id else None
-
         # Gather visible entities (only in same zone with visibility != hidden)
         visible_entities = []
         if current_zone_id:
@@ -720,7 +723,7 @@ class Validator:
 
         # Generate summary based on topic and facts
         summary = self._generate_narration_summary(
-            topic, facts, current_zone, visible_entities, scene_tags
+            topic, facts, current_zone, visible_entities, scene_tags, state
         )
 
         # Determine tone tags from scene and topic
@@ -758,6 +761,7 @@ class Validator:
         current_zone,
         visible_entities: list,
         scene_tags: dict,
+        state: GameState,
     ) -> str:
         """Generate narration summary based on topic and facts."""
         zone_name = facts.get("zone_name", "an unknown location")
@@ -770,7 +774,7 @@ class Validator:
             if visible_entities:
                 entity_names = []
                 for entity_id in visible_entities[:2]:  # Limit to first 2 entities
-                    entity = facts.get("pov_state", {}).get("actors", {}).get(entity_id)
+                    entity = state.actors.get(entity_id)
                     if entity and hasattr(entity, "name"):
                         entity_names.append(entity.name)
                     else:
@@ -793,7 +797,7 @@ class Validator:
                 return f"You listen carefully to the sounds of {zone_name}."
 
         elif topic == "smell":
-            if "grain" in str(scene_tags):
+            if any("grain" in str(v).lower() for v in scene_tags.values()):
                 return f"You breathe in deeply. The scent of grain fills the air in {zone_name}."
             else:
                 return f"You breathe in deeply, taking in the scents of {zone_name}."
@@ -803,6 +807,10 @@ class Validator:
 
         elif topic == "establishing":
             return f"You gather yourself in {zone_name}."
+
+        elif topic.startswith("zoom_in:"):
+            entity_id = topic.split(":", 1)[1]
+            return f"You focus your attention on the nearby presence."
 
         elif topic.startswith("zoom_in:"):
             entity_id = topic.split(":", 1)[1]

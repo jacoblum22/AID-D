@@ -251,12 +251,16 @@ class AffordanceFilter:
                 if len(current_actor.visible_actors) == 1:
                     entity_id = current_actor.visible_actors[0]
                     entity = state.actors.get(entity_id)
-                    if entity and hasattr(entity, "name"):
+                    if (
+                        entity
+                        and hasattr(entity, "name")
+                        and isinstance(entity.name, str)
+                    ):
                         # Check if utterance mentions this entity specifically
                         if entity.name.lower() in utterance.text.lower():
-                            enriched["topic"] = f"zoom_in:{entity_id}"
-
-        # Add contextual hints for better narration
+                            enriched["topic"] = (
+                                f"zoom_in:{entity_id}"  # Add contextual hints for better narration
+                            )
         if state.scene:
             scene_tags = getattr(state.scene, "tags", {})
             enriched["scene_context"] = scene_tags
