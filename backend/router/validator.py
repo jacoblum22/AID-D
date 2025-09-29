@@ -669,19 +669,211 @@ class Validator:
     def _execute_narrate_only(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute narrate_only tool."""
+        """Execute narrate_only tool - Pure narration for flavor moves or observation."""
+
+        # Extract arguments
+        actor_id = args.get("actor") or state.current_actor
+        topic = args.get("topic") or "look around"
+
+        # Determine POV and current zone
+        pov_actor = state.actors.get(actor_id) if actor_id else None
+        current_zone_id = (
+            pov_actor.current_zone
+            if pov_actor and hasattr(pov_actor, "current_zone")
+            else None
+        )
+        current_zone = state.zones.get(current_zone_id) if current_zone_id else None
+        # Gather visible entities (only in same zone with visibility != hidden)
+        visible_entities = []
+        if current_zone_id:
+            for entity_id, entity in state.actors.items():
+                if (
+                    entity_id != actor_id
+                    and hasattr(entity, "current_zone")
+                    and entity.current_zone == current_zone_id
+                    and getattr(entity, "visibility", "visible") == "visible"
+                ):
+                    visible_entities.append(entity_id)
+
+        # Get salient features from zone (limit to top 2-3)
+        salient_features = []
+        if current_zone:
+            zone_features = getattr(current_zone, "features", [])
+            salient_features = zone_features[:3] if zone_features else []
+
+            # Add zone description as a feature if it exists
+            if hasattr(current_zone, "description") and current_zone.description:
+                salient_features.insert(0, current_zone.description)
+
+        # Get scene tags for tone/lighting/atmosphere
+        scene_tags = {}
+        if state.scene:
+            scene_tags = getattr(state.scene, "tags", {})
+
+        # Create facts dict
+        facts = {
+            "pov": actor_id,
+            "zone": current_zone_id,
+            "zone_name": current_zone.name if current_zone else "Unknown Location",
+            "visible_entities": visible_entities,
+            "salient_features": salient_features,
+            "scene_tags": scene_tags,
+            "topic": topic,
+        }
+
+        # Generate summary based on topic and facts
+        summary = self._generate_narration_summary(
+            topic, facts, current_zone, visible_entities, scene_tags, state
+        )
+
+        # Determine tone tags from scene and topic
+        tone_tags = self._get_narration_tone_tags(topic, scene_tags)
+
+        # Determine sensory focus based on topic
+        sensory = self._topic_to_senses(topic)
+
+        # Determine camera angle based on topic
+        camera = self._topic_to_camera(topic)
+
+        # Create narration hint
+        narration_hint = {
+            "summary": summary,
+            "tone_tags": tone_tags,
+            "mentioned_entities": visible_entities,
+            "sensory": sensory,
+            "camera": camera,
+            "sentences_max": 4 if topic == "recap" else 3,
+        }
+
         return ToolResult(
             ok=True,
             tool_id="narrate_only",
             args=args,
-            facts={"narration_only": True},
-            effects=[],
-            narration_hint={
-                "summary": "Scene narration",
-                "tone_tags": ["atmospheric"],
-                "salient_entities": [],
-            },
+            facts=facts,
+            effects=[],  # narrate_only never changes state
+            narration_hint=narration_hint,
         )
+
+    def _generate_narration_summary(
+        self,
+        topic: str,
+        facts: dict,
+        current_zone,
+        visible_entities: list,
+        scene_tags: dict,
+        state: GameState,
+    ) -> str:
+        """Generate narration summary based on topic and facts."""
+        zone_name = facts.get("zone_name", "an unknown location")
+
+        # Handle None topic
+        if not topic:
+            topic = "look around"
+
+        if topic == "look around":
+            if visible_entities:
+                entity_names = []
+                for entity_id in visible_entities[:2]:  # Limit to first 2 entities
+                    entity = state.actors.get(entity_id)
+                    if entity and hasattr(entity, "name"):
+                        entity_names.append(entity.name)
+                    else:
+                        entity_names.append("a figure")
+
+                entities_text = " and ".join(entity_names) if entity_names else ""
+                if entities_text:
+                    return f"You survey {zone_name}. {entities_text} can be seen here."
+                else:
+                    return f"You survey {zone_name}."
+            else:
+                return f"You survey {zone_name}. The area appears quiet."
+
+        elif topic == "listen":
+            if scene_tags.get("noise") == "loud":
+                return f"You listen carefully. Loud sounds echo through {zone_name}."
+            elif scene_tags.get("noise") == "quiet":
+                return f"You listen carefully. {zone_name} is eerily quiet."
+            else:
+                return f"You listen carefully to the sounds of {zone_name}."
+
+        elif topic == "smell":
+            if any("grain" in str(v).lower() for v in scene_tags.values()):
+                return f"You breathe in deeply. The scent of grain fills the air in {zone_name}."
+            else:
+                return f"You breathe in deeply, taking in the scents of {zone_name}."
+
+        elif topic == "recap":
+            return f"You pause to consider your situation in {zone_name}."
+
+        elif topic == "establishing":
+            return f"You gather yourself in {zone_name}."
+
+        elif topic.startswith("zoom_in:"):
+            entity_id = topic.split(":", 1)[1]
+            return f"You focus your attention on the nearby presence."
+
+        elif topic.startswith("zoom_in:"):
+            entity_id = topic.split(":", 1)[1]
+            return f"You focus your attention on the nearby presence."
+
+        else:
+            return f"You observe {zone_name}."
+
+    def _get_narration_tone_tags(self, topic: str, scene_tags: dict) -> list:
+        """Get appropriate tone tags for narration based on topic and scene."""
+        base_tags = ["atmospheric"]
+
+        # Handle None topic
+        if not topic:
+            topic = "look around"
+
+        # Add scene-based tags
+        if scene_tags.get("lighting") == "dim":
+            base_tags.append("moody")
+        if scene_tags.get("alert") == "sleepy":
+            base_tags.append("quiet")
+        if scene_tags.get("noise") == "loud":
+            base_tags.append("tense")
+
+        # Add topic-based tags
+        if topic == "recap":
+            base_tags.append("reflective")
+        elif topic in ["listen", "smell"]:
+            base_tags.append("sensory")
+        elif topic == "establishing":
+            base_tags.append("introspective")
+
+        return base_tags
+
+    def _topic_to_senses(self, topic: str) -> list:
+        """Map topic to relevant senses."""
+        if not topic:
+            topic = "look around"
+
+        if topic == "listen":
+            return ["sound"]
+        elif topic == "smell":
+            return ["smell"]
+        elif topic.startswith("zoom_in"):
+            return ["sight", "sound"]
+        else:
+            return ["sight"]
+
+    def _topic_to_camera(self, topic: str) -> str:
+        """Map topic to camera angle/distance."""
+        if not topic:
+            topic = "look around"
+
+        if topic == "look around":
+            return "over-shoulder"
+        elif topic == "establishing":
+            return "wide"
+        elif topic.startswith("zoom_in"):
+            return "close-up"
+        elif topic == "recap":
+            return "wide"
+        else:
+            return "over-shoulder"
 
     def _execute_apply_effects(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int

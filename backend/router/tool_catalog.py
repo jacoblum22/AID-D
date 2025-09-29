@@ -88,9 +88,10 @@ class UseItemArgs(ToolArgs):
 
 
 class NarrateOnlyArgs(ToolArgs):
-    """Arguments for narrate_only tool (minimal)."""
+    """Arguments for narrate_only tool."""
 
-    scene_description: Optional[str] = None
+    actor: Optional[str] = None
+    topic: Optional[str] = None  # "look around", "recap", "listen", "smell", etc.
 
 
 class GetInfoArgs(ToolArgs):
@@ -376,6 +377,69 @@ def suggest_talk_args(state, utterance) -> Dict[str, Any]:
     return args
 
 
+def suggest_narrate_only_args(state, utterance) -> Dict[str, Any]:
+    """Suggest arguments for narrate_only based on topic inference heuristics."""
+    args = {}
+
+    # Set actor
+    if state.current_actor:
+        args["actor"] = state.current_actor
+
+    # Infer topic from utterance using classification/regex
+    text_lower = utterance.text.lower().strip()
+
+    # Contains look/see/watch/survey/scan → "look around"
+    if any(
+        word in text_lower
+        for word in ["look", "see", "watch", "survey", "scan", "observe", "examine"]
+    ):
+        args["topic"] = "look around"
+
+    # Contains listen/hear → "listen"
+    elif any(word in text_lower for word in ["listen", "hear", "sound", "noise"]):
+        args["topic"] = "listen"
+
+    # Contains smell/scent/odor → "smell"
+    elif any(word in text_lower for word in ["smell", "scent", "odor", "sniff"]):
+        args["topic"] = "smell"
+
+    # Contains recap/remind/what happened → "recap"
+    elif any(
+        phrase in text_lower
+        for phrase in ["recap", "remind", "what happened", "summary", "so far"]
+    ):
+        args["topic"] = "recap"
+
+    # Check for zoom_in on specific entity mentions
+    elif state.current_actor:
+        current_actor = state.actors.get(state.current_actor)
+        if current_actor and hasattr(current_actor, "visible_actors"):
+            # Look for mentions of visible actor names/IDs in the text
+            for actor_id in current_actor.visible_actors:
+                actor_obj = state.actors.get(actor_id)
+                if actor_obj:
+                    # Check if actor name or ID is mentioned
+                    if (
+                        hasattr(actor_obj, "name")
+                        and actor_obj.name.lower() in text_lower
+                    ) or actor_id.lower() in text_lower:
+                        args["topic"] = f"zoom_in:{actor_id}"
+                        break
+
+        # If no entity match found, check if starts with "I" and no actionable verb → "establishing"
+        if (
+            "topic" not in args
+            and text_lower.startswith("i ")
+            and not utterance.has_actionable_verb()
+        ):
+            args["topic"] = "establishing"
+
+    # Fallback: "look around"
+    args.setdefault("topic", "look around")
+
+    return args
+
+
 # Tool catalog definition
 TOOL_CATALOG: List[Tool] = [
     Tool(
@@ -389,7 +453,7 @@ TOOL_CATALOG: List[Tool] = [
         id="narrate_only",
         desc="No mechanics; just narrate the scene.",
         precond=narrate_only_precond,
-        suggest_args=lambda state, utterance: {},
+        suggest_args=suggest_narrate_only_args,
         args_schema=NarrateOnlyArgs,
     ),
     Tool(
