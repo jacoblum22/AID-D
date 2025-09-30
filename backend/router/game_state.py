@@ -15,6 +15,7 @@ class Zone(BaseModel):
     name: str
     description: str
     adjacent_zones: List[str]
+    blocked_exits: List[str] = []  # Optional list of blocked adjacent zones
 
 
 class HP(BaseModel):
