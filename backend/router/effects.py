@@ -115,10 +115,8 @@ def apply_guard(state: GameState, e: Dict[str, Any]) -> None:
 
 @effect("mark")
 def apply_mark(state: GameState, e: Dict[str, Any]) -> None:
-    """Apply a mark/bonus to a living entity."""
+    """Apply a mark/bonus to a living entity or remove marks."""
     target_id = e["target"]
-    style_bonus = e["style_bonus"]
-    consumes = e.get("consumes", True)
 
     if target_id in state.entities:
         entity: Entity = state.entities[target_id]
@@ -130,13 +128,24 @@ def apply_mark(state: GameState, e: Dict[str, Any]) -> None:
         # Type cast for static analysis
         living_entity: Union[PC, NPC] = cast(Union[PC, NPC], entity)
 
-        # Update using Pydantic's copy mechanism
-        updated_entity = living_entity.model_copy(
-            update={
-                "style_bonus": living_entity.style_bonus + style_bonus,
-                "mark_consumes": consumes,
-            }
-        )
+        # Check if this is a removal operation
+        if e.get("remove", False):
+            # Remove all marks by setting style_bonus to 0
+            updated_entity = living_entity.model_copy(
+                update={"style_bonus": 0, "mark_consumes": True}
+            )
+        else:
+            # Add mark as before
+            style_bonus = e["style_bonus"]
+            consumes = e.get("consumes", True)
+
+            updated_entity = living_entity.model_copy(
+                update={
+                    "style_bonus": living_entity.style_bonus + style_bonus,
+                    "mark_consumes": consumes,
+                }
+            )
+
         state.entities[target_id] = updated_entity
 
 

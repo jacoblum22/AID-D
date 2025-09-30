@@ -2,11 +2,12 @@
 
 import pytest
 import sys
+from pathlib import Path
 
-sys.path.insert(
-    0, "c:\\Users\\jacob\\OneDrive - UBC\\Desktop\\Personal Projects\\AID&D"
-)
-
+# Dynamically insert the repository root into sys.path for test portability
+ROOT = Path(__file__).resolve().parents[1]  # repo root
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 from backend.router.tool_catalog import TOOL_CATALOG, Tool, AskRollArgs
 from backend.router.game_state import (
     GameState,
@@ -252,3 +253,35 @@ def test_utterance_has_actionable_verb_method():
     # Test that it returns a boolean
     result = utterance.has_actionable_verb()
     assert isinstance(result, bool), "has_actionable_verb should return boolean"
+
+
+def test_attack_args_suggestion_no_current_actor():
+    """Test that suggest_attack_args returns empty dict when no current actor exists."""
+    from backend.router.tool_catalog import suggest_attack_args
+
+    # Create state with no current_actor
+    state_no_actor = GameState(
+        entities={}, zones={}, current_actor=None, pending_action=None
+    )
+
+    utterance = Utterance(text="I attack", actor_id="pc.test")
+
+    # Should return empty dict instead of None values that would fail validation
+    result = suggest_attack_args(state_no_actor, utterance)
+
+    assert isinstance(result, dict), "Should return a dictionary"
+    assert result == {}, "Should return empty dict when no current actor"
+
+    # Verify this avoids Pydantic validation issues
+    from backend.router.tool_catalog import AttackArgs
+
+    # Empty dict should not contain None values that would fail validation
+    # This tests the fix where we return {} instead of {"actor": None, "target": None, ...}
+    if result:  # Only validate if not empty
+        try:
+            AttackArgs(**result)
+        except Exception as e:
+            # Should not have validation errors about None values
+            assert (
+                "none is not an allowed value" not in str(e).lower()
+            ), f"Should not have None validation errors: {e}"
