@@ -845,7 +845,9 @@ class Validator:
             return f"{attacker_name} hits with {weapon_text} for {damage} damage"
         elif outcome == "partial":
             # damage parameter is already halved by caller (line 711)
-            return f"{attacker_name}'s {weapon_text} grazes the target for {damage} damage"
+            return (
+                f"{attacker_name}'s {weapon_text} grazes the target for {damage} damage"
+            )
         else:  # fail
             return f"{attacker_name}'s {weapon_text} misses completely"
 

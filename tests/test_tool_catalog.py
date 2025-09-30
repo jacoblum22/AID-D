@@ -263,18 +263,18 @@ def test_attack_args_suggestion_no_current_actor():
     state_no_actor = GameState(
         entities={}, zones={}, current_actor=None, pending_action=None
     )
-    
+
     utterance = Utterance(text="I attack", actor_id="pc.test")
-    
+
     # Should return empty dict instead of None values that would fail validation
     result = suggest_attack_args(state_no_actor, utterance)
-    
+
     assert isinstance(result, dict), "Should return a dictionary"
     assert result == {}, "Should return empty dict when no current actor"
-    
+
     # Verify this avoids Pydantic validation issues
     from backend.router.tool_catalog import AttackArgs
-    
+
     # Empty dict should not contain None values that would fail validation
     # This tests the fix where we return {} instead of {"actor": None, "target": None, ...}
     if result:  # Only validate if not empty
@@ -282,4 +282,6 @@ def test_attack_args_suggestion_no_current_actor():
             AttackArgs(**result)
         except Exception as e:
             # Should not have validation errors about None values
-            assert "none is not an allowed value" not in str(e).lower(), f"Should not have None validation errors: {e}"
+            assert (
+                "none is not an allowed value" not in str(e).lower()
+            ), f"Should not have None validation errors: {e}"
