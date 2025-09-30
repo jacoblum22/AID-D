@@ -553,29 +553,216 @@ class Validator:
     def _execute_attack(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute attack tool - combat mechanics."""
+        """Execute attack tool - combat mechanics with Style+Domain rolling."""
         import random
 
         random.seed(seed)
 
+        # Extract arguments
         actor = args.get("actor")
         target = args.get("target")
-        weapon = args.get("weapon", "weapon")
+        style = args.get("style", 1)
+        domain = args.get("domain", "d6")
+        dc_hint = args.get("dc_hint", 12)
+        adv_style_delta = args.get("adv_style_delta", 0)
+        weapon = args.get("weapon", "basic_melee")
+        damage_expr = args.get("damage_expr", "1d6")
+        consume_mark = args.get("consume_mark", True)
 
-        # Simple combat: roll to hit, then damage
-        hit_roll = random.randint(1, 20)
-        hits = hit_roll >= 10  # Simple AC
-        damage = random.randint(1, 8) if hits else 0
+        # Validate entities exist
+        if actor not in state.entities:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": "I can't find the attacker. Who is attacking?"},
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing attacker",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' not found in entities",
+            )
 
+        if target not in state.entities:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": "I can't find the target. Who are you attacking?"},
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing target",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Target '{target}' not found in entities",
+            )
+
+        attacker = state.entities[actor]
+        target_entity = state.entities[target]
+
+        # Validate target is attackable (has HP)
+        if target_entity.type not in ("pc", "npc"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": "You can't attack that. Try attacking a living creature instead."
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to invalid target type",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Target '{target}' is not attackable (type: {target_entity.type})",
+            )
+
+        # Validate visibility
+        if attacker.type in ("pc", "npc") and hasattr(attacker, "visible_actors"):
+            attacker_creature = cast(Union[PC, NPC], attacker)
+            if target not in attacker_creature.visible_actors:
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={"question": "You can't see your target. Look around first."},
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": "Asked for clarification due to invisible target",
+                        "tone_tags": ["helpful"],
+                        "salient_entities": [],
+                    },
+                    error_message=f"Target '{target}' is not visible to attacker '{actor}'",
+                )
+
+        # Check if target has mark and calculate effective style
+        target_has_mark = False
+        if target_entity.type in ("pc", "npc"):
+            target_creature = cast(Union[PC, NPC], target_entity)
+            target_has_mark = (
+                hasattr(target_creature, "style_bonus")
+                and target_creature.style_bonus > 0
+            )
+
+        effective_style = max(0, min(3, style + adv_style_delta))
+
+        # Add mark bonus if consuming mark
+        mark_consumed = False
+        if consume_mark and target_has_mark:
+            effective_style = min(3, effective_style + 1)  # Cap at 3
+            mark_consumed = True
+
+        # Parse domain die size
+        try:
+            if not domain.startswith("d") or not domain[1:].isdigit():
+                raise ValueError(f"Invalid domain format: {domain}")
+            domain_size = int(domain[1:])  # "d6" -> 6
+        except (ValueError, IndexError):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"I don't understand the dice format '{domain}'. Please use format like 'd6' or 'd8'."
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to invalid dice format",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Invalid domain format: {domain}",
+            )
+
+        # Roll attack: d20 + sum(effective_style × domain dice)
+        d20_roll = random.randint(1, 20)
+        style_dice = [random.randint(1, domain_size) for _ in range(effective_style)]
+        style_sum = sum(style_dice)
+        total = d20_roll + style_sum
+
+        # Calculate margin and determine outcome
+        margin = total - dc_hint
+        if d20_roll == 20 or margin >= 5:
+            outcome = "crit_success"
+        elif margin >= 0:
+            outcome = "success"
+        elif margin >= -3:
+            outcome = "partial"
+        else:
+            outcome = "fail"
+
+        # Calculate damage based on outcome
+        damage = 0
+        raw_damage = 0
+        damage_dice = []
+
+        if outcome != "fail":
+            # Parse damage expression and roll dice
+            damage_dice, raw_damage = self._roll_damage(
+                damage_expr, outcome == "crit_success", random
+            )
+
+            # Handle partial success (half damage)
+            if outcome == "partial":
+                damage = raw_damage // 2
+            else:
+                damage = raw_damage
+
+        # Generate effects
         effects = []
-        if hits and damage > 0:
-            effects.append({"type": "hp", "target": target, "delta": -damage})
 
+        # Apply damage if any
+        if damage > 0:
+            effects.append(
+                {
+                    "type": "hp",
+                    "target": target,
+                    "delta": -damage,
+                    "source": actor,
+                    "cause": "attack",
+                }
+            )
+
+        # Remove mark if consumed
+        if mark_consumed:
+            effects.append(
+                {
+                    "type": "mark",
+                    "target": target,
+                    "remove": True,
+                    "source": actor,
+                    "cause": "attack",
+                }
+            )
+
+        # Create detailed narration hint
         narration_hint = {
-            "summary": f"Hit for {damage} damage" if hits else "Missed",
-            "dice": {"d20": hit_roll, "damage": damage},
-            "outcome": "hit" if hits else "miss",
-            "tone_tags": ["combat", "tense"],
+            "summary": self._get_attack_summary(
+                outcome,
+                weapon,
+                damage,
+                attacker.name if hasattr(attacker, "name") else actor,
+            ),
+            "dice": {
+                "d20": d20_roll,
+                "style": style_dice,
+                "style_sum": style_sum,
+                "total": total,
+                "dc": dc_hint,
+                "margin": margin,
+                "effective_style": effective_style,
+                "damage_dice": damage_dice,
+            },
+            "outcome": outcome,
+            "raw_damage": raw_damage,
+            "applied_damage": damage,
+            "mark_consumed": mark_consumed,
+            "tone_tags": ["violent", "tense"]
+            + (["critical"] if outcome == "crit_success" else []),
             "salient_entities": [actor, target],
         }
 
@@ -583,10 +770,84 @@ class Validator:
             ok=True,
             tool_id="attack",
             args=args,
-            facts={"hit": hits, "damage": damage},
+            facts={
+                "outcome": outcome,
+                "margin": margin,
+                "total": total,
+                "dc": dc_hint,
+                "raw_damage": raw_damage,
+                "applied_damage": damage,
+                "mark_consumed": mark_consumed,
+                "weapon": weapon,
+            },
             effects=effects,
             narration_hint=narration_hint,
         )
+
+    def _roll_damage(self, damage_expr: str, is_crit: bool, random_module) -> tuple:
+        """Roll damage dice based on expression and critical hit status."""
+        damage_dice = []
+        total_damage = 0
+
+        try:
+            # Parse damage expression (e.g., "1d6", "1d6+1", "2d4")
+            if "+" in damage_expr:
+                dice_part, bonus_part = damage_expr.split("+", 1)
+                bonus = int(bonus_part.strip())
+            else:
+                dice_part = damage_expr.strip()
+                bonus = 0
+
+            # Parse dice part (e.g., "1d6" -> count=1, size=6)
+            if "d" not in dice_part:
+                raise ValueError(f"Invalid damage expression: {damage_expr}")
+
+            count_str, size_str = dice_part.split("d", 1)
+            dice_count = int(count_str.strip())
+            dice_size = int(size_str.strip())
+
+            # Roll base damage
+            for _ in range(dice_count):
+                roll = random_module.randint(1, dice_size)
+                damage_dice.append({"type": "base", "value": roll})
+                total_damage += roll
+
+            # Add bonus
+            total_damage += bonus
+
+            # Critical success: add extra damage (1d6 bonus)
+            if is_crit:
+                crit_roll = random_module.randint(1, 6)
+                damage_dice.append({"type": "crit", "value": crit_roll})
+                total_damage += crit_roll
+
+        except (ValueError, IndexError) as e:
+            # Fallback to simple 1d6 if parsing fails
+            roll = random_module.randint(1, 6)
+            damage_dice = [{"type": "base", "value": roll}]
+            total_damage = roll
+            if is_crit:
+                crit_roll = random_module.randint(1, 6)
+                damage_dice.append({"type": "crit", "value": crit_roll})
+                total_damage += crit_roll
+
+        return damage_dice, total_damage
+
+    def _get_attack_summary(
+        self, outcome: str, weapon: str, damage: int, attacker_name: str
+    ) -> str:
+        """Generate attack summary text based on outcome."""
+        weapon_text = weapon if weapon != "basic_melee" else "weapon"
+
+        if outcome == "crit_success":
+            return f"{attacker_name}'s {weapon_text} strikes true, dealing {damage} devastating damage"
+        elif outcome == "success":
+            return f"{attacker_name} hits with {weapon_text} for {damage} damage"
+        elif outcome == "partial":
+            # damage parameter is already halved by caller (line 711)
+            return f"{attacker_name}'s {weapon_text} grazes the target for {damage} damage"
+        else:  # fail
+            return f"{attacker_name}'s {weapon_text} misses completely"
 
     def _execute_use_item(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
@@ -739,7 +1000,7 @@ class Validator:
         narration_hint = {
             "summary": summary,
             "tone_tags": tone_tags,
-            "mentioned_entities": visible_entities,
+            "salient_entities": visible_entities,
             "sensory": sensory,
             "camera": camera,
             "sentences_max": 4 if topic == "recap" else 3,

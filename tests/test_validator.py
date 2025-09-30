@@ -186,10 +186,10 @@ def test_attack_execution(demo_state):
 
     assert result.ok is True, f"attack should succeed: {result.error_message}"
     assert result.tool_id == "attack"
-    assert "hit" in result.facts
-    assert "damage" in result.facts
-    assert isinstance(result.facts["hit"], bool)
-    assert isinstance(result.facts["damage"], int)
+    assert "outcome" in result.facts
+    assert "applied_damage" in result.facts
+    assert result.facts["outcome"] in ["crit_success", "success", "partial", "fail"]
+    assert isinstance(result.facts["applied_damage"], int)
 
 
 def test_use_item_execution(demo_state):
@@ -326,7 +326,10 @@ def test_state_modifications_persist(demo_state):
 
     assert result.ok is True, f"Attack should succeed: {result.error_message}"
     # Check if damage was applied (if hit)
-    if result.facts["hit"] and result.facts["damage"] > 0:
+    if (
+        result.facts["outcome"] in ["success", "crit_success", "partial"]
+        and result.facts["applied_damage"] > 0
+    ):
         guard_hp = getattr(demo_state.actors["npc.guard.01"], "hp", None)
         if guard_hp:
             assert guard_hp.current < guard_hp.max, "Guard should take damage if hit"
@@ -408,6 +411,145 @@ def test_fixed_critical_failure_delta():
     # Specifically test the fix: should be 3 vs 2
     assert fail_alarm["delta"] == 2, "Regular failure should have delta=2"
     assert crit_fail_alarm["delta"] == 3, "Critical failure should have delta=3"
+
+
+def test_damage_dice_type_consistency():
+    """Test that damage_dice uses consistent dictionary format for all entries."""
+    from router.validator import Validator
+    import random
+
+    validator = Validator()
+    
+    # Test regular damage without crit
+    damage_dice, total_damage = validator._roll_damage("1d6", False, random)
+    
+    # Should have exactly one entry (the base damage roll)
+    assert len(damage_dice) == 1, "Regular damage should have one dice entry"
+    
+    # Check that it's a dictionary with proper structure
+    dice_entry = damage_dice[0]
+    assert isinstance(dice_entry, dict), "Damage dice entry should be a dictionary"
+    assert "type" in dice_entry, "Damage dice entry should have 'type' field"
+    assert "value" in dice_entry, "Damage dice entry should have 'value' field"
+    assert dice_entry["type"] == "base", "Regular damage should have type 'base'"
+    assert isinstance(dice_entry["value"], int), "Damage value should be an integer"
+    assert 1 <= dice_entry["value"] <= 6, "1d6 should roll between 1 and 6"
+    
+    # Test critical damage
+    damage_dice, total_damage = validator._roll_damage("1d6", True, random)
+    
+    # Should have two entries (base damage + crit damage)
+    assert len(damage_dice) == 2, "Critical damage should have two dice entries"
+    
+    # Check base damage entry
+    base_entry = damage_dice[0]
+    assert isinstance(base_entry, dict), "Base damage entry should be a dictionary"
+    assert base_entry["type"] == "base", "First entry should be base damage"
+    assert isinstance(base_entry["value"], int), "Base damage value should be an integer"
+    
+    # Check crit damage entry
+    crit_entry = damage_dice[1]
+    assert isinstance(crit_entry, dict), "Crit damage entry should be a dictionary"
+    assert crit_entry["type"] == "crit", "Second entry should be crit damage"
+    assert isinstance(crit_entry["value"], int), "Crit damage value should be an integer"
+    assert 1 <= crit_entry["value"] <= 6, "Crit damage should roll 1d6"
+
+
+def test_partial_damage_no_double_halving():
+    """Test that partial damage is not halved twice in attack summary."""
+    from router.validator import Validator
+
+    validator = Validator()
+    
+    # Test partial outcome with already-halved damage value
+    halved_damage = 4  # This represents damage already halved from 8 raw damage
+    summary = validator._get_attack_summary("partial", "sword", halved_damage, "TestActor")
+    
+    # Should use the damage value as-is, not halve it again
+    expected_summary = f"TestActor's sword grazes the target for {halved_damage} damage"
+    assert summary == expected_summary, f"Partial damage should not be halved again. Got: {summary}"
+    
+    # Compare with success to ensure we're not double-halving
+    success_summary = validator._get_attack_summary("success", "sword", 8, "TestActor")
+    partial_summary = validator._get_attack_summary("partial", "sword", 4, "TestActor")  # 4 is already halved from 8
+    
+    # The damage numbers in the strings should match the passed values
+    assert "8 damage" in success_summary, "Success should show full damage"
+    assert "4 damage" in partial_summary, "Partial should show halved damage (already halved by caller)"
+
+
+def test_consistent_field_naming_salient_entities():
+    """Test that narration_hint consistently uses 'salient_entities' instead of 'mentioned_entities'."""
+    from router.validator import validate_and_execute
+
+    # Test various error conditions that should use salient_entities
+    demo_state = GameState(
+        entities={}, zones={}, current_actor=None, pending_action=None
+    )
+    
+    utterance = Utterance(text="I attack someone", actor_id="pc.arin")
+
+    # Test missing actor error
+    result = validate_and_execute(
+        "attack",
+        {"actor": "nonexistent_actor", "target": "some_target"},
+        demo_state,
+        utterance,
+        seed=12345,
+    )
+    
+    assert result.ok is False, "Should fail with missing actor"
+    assert "narration_hint" in result.to_dict(), "Should have narration_hint"
+    narration_hint = result.to_dict()["narration_hint"]
+    assert "salient_entities" in narration_hint, "Should use 'salient_entities' field"
+    assert "mentioned_entities" not in narration_hint, "Should not use 'mentioned_entities' field"
+    
+    # Add a target entity to test missing target error
+    demo_state.entities["some_target"] = PC(id="some_target", name="Target", current_zone="zone1")
+    
+    result = validate_and_execute(
+        "attack",
+        {"actor": "some_target", "target": "nonexistent_target"},
+        demo_state,
+        utterance,
+        seed=12345,
+    )
+    
+    assert result.ok is False, "Should fail with missing target"
+    narration_hint = result.to_dict()["narration_hint"]
+    assert "salient_entities" in narration_hint, "Should use 'salient_entities' field"
+    assert "mentioned_entities" not in narration_hint, "Should not use 'mentioned_entities' field"
+
+
+def test_tool_catalog_suggest_attack_args_no_actor():
+    """Test that suggest_attack_args returns empty dict when no current actor exists."""
+    from router.tool_catalog import suggest_attack_args
+    from router.game_state import Utterance
+    
+    # Create state with no current_actor
+    state = GameState(
+        entities={}, zones={}, current_actor=None, pending_action=None
+    )
+    
+    utterance = Utterance(text="I attack", actor_id="pc.test")
+    
+    # Should return empty dict instead of None values that would fail validation
+    result = suggest_attack_args(state, utterance)
+    
+    assert isinstance(result, dict), "Should return a dictionary"
+    assert result == {}, "Should return empty dict when no current actor"
+    
+    # Verify this doesn't cause Pydantic validation issues
+    from router.tool_catalog import AttackArgs
+    
+    # If result is empty, AttackArgs validation should handle it gracefully
+    # (the calling code would need to handle missing required fields)
+    if result:  # Only validate if not empty
+        try:
+            AttackArgs(**result)
+        except Exception as e:
+            # Empty dict should not cause issues - this tests that we don't have None values
+            assert "None" not in str(e), f"Should not have None validation errors: {e}"
 
 
 if __name__ == "__main__":

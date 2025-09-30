@@ -66,8 +66,13 @@ class AttackArgs(ToolArgs):
 
     actor: str
     target: str
-    weapon: Optional[str] = None
-    zone: Optional[str] = None
+    style: Annotated[int, Field(ge=0, le=3)] = 1
+    domain: Literal["d4", "d6", "d8"] = "d6"
+    dc_hint: Annotated[int, Field(ge=8, le=22)] = 12  # target's defense / dodge DC
+    adv_style_delta: Annotated[int, Field(ge=-1, le=1)] = 0
+    weapon: Optional[str] = "basic_melee"
+    damage_expr: Literal["1d6", "1d6+1", "2d4"] = "1d6"
+    consume_mark: bool = True
 
 
 class TalkArgs(ToolArgs):
@@ -158,25 +163,31 @@ def move_precond(state, utterance) -> bool:
 
 
 def attack_precond(state, utterance) -> bool:
-    """attack available when there's a visible enemy and actor has weapon."""
+    """attack available when there's a visible enemy in the same zone."""
     if not state.current_actor:
         return False
 
-    current_actor = state.actors.get(state.current_actor)
-    if (
-        not current_actor
-        or not hasattr(current_actor, "has_weapon")
-        or not current_actor.has_weapon
-    ):
+    current_actor = state.entities.get(state.current_actor)
+    if not current_actor or current_actor.type not in ("pc", "npc"):
         return False
 
-    # Check if there are any visible enemies (NPCs in same zone)
+    # Check if actor has positive HP (can't attack if unconscious)
+    if hasattr(current_actor, "hp") and current_actor.hp.current <= 0:
+        return False
+
+    # Check for visible enemies (PC can attack NPCs, NPCs can attack PCs)
     if hasattr(current_actor, "visible_actors"):
-        # Check if any visible actors are actually NPCs (attackable targets)
         for actor_id in current_actor.visible_actors:
-            target = state.actors.get(actor_id)
-            if target and hasattr(target, "type") and target.type == "npc":
-                return True
+            target = state.entities.get(actor_id)
+            if (
+                target
+                and target.type in ("pc", "npc")
+                and target.type != current_actor.type
+            ):
+                # Found a valid target of different type with positive HP
+                if hasattr(target, "hp") and target.hp.current > 0:
+                    return True
+
     return False
 
 
@@ -303,24 +314,45 @@ def suggest_move_args(state, utterance) -> Dict[str, Any]:
 
 
 def suggest_attack_args(state, utterance) -> Dict[str, Any]:
-    """Suggest arguments for attack tool with safe actor access."""
+    """Suggest arguments for attack tool with intelligent defaults."""
     args = {}
 
     if state.current_actor:
         args["actor"] = state.current_actor
-        current_actor = state.actors.get(state.current_actor)
+        current_actor = state.entities.get(state.current_actor)
 
-        if (
-            current_actor
-            and hasattr(current_actor, "visible_actors")
-            and current_actor.visible_actors
-        ):
-            args["target"] = current_actor.visible_actors[0]
-        else:
-            args["target"] = None
+        if current_actor and hasattr(current_actor, "visible_actors"):
+            # Find first valid target (different type, positive HP)
+            for actor_id in current_actor.visible_actors:
+                target = state.entities.get(actor_id)
+                if (
+                    target
+                    and target.type in ("pc", "npc")
+                    and target.type != current_actor.type
+                    and hasattr(target, "hp")
+                    and target.hp.current > 0
+                ):
+                    args["target"] = actor_id
+
+                    # Try to estimate DC from target's stats if available
+                    if hasattr(target, "stats"):
+                        # Basic AC calculation: 10 + DEX modifier (simplified)
+                        dex_mod = (target.stats.dexterity - 10) // 2
+                        base_ac = 10 + dex_mod
+                        args["dc_hint"] = max(8, min(22, base_ac))
+                    break
+
+        # Set reasonable defaults
+        args.setdefault("style", 1)
+        args.setdefault("domain", "d6")
+        args.setdefault("dc_hint", 12)
+        args.setdefault("adv_style_delta", 0)
+        args.setdefault("weapon", "basic_melee")
+        args.setdefault("damage_expr", "1d6")
+        args.setdefault("consume_mark", True)
     else:
-        args["actor"] = None
-        args["target"] = None
+        # No current actor - return empty dict to let caller handle missing args
+        args = {}
 
     return args
 
