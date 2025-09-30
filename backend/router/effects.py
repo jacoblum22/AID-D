@@ -201,6 +201,86 @@ def apply_effects(state: GameState, effects: List[Dict[str, Any]]) -> GameState:
     return state
 
 
+@effect("tag")
+def apply_tag(state: GameState, e: Dict[str, Any]) -> None:
+    """Apply tag changes to scene or entities."""
+    target_id = e["target"]
+
+    if target_id == "scene":
+        # Modify scene tags
+        if "add" in e:
+            if isinstance(e["add"], dict):
+                # Add multiple tags
+                for key, value in e["add"].items():
+                    state.scene.tags[key] = str(value)
+            else:
+                raise ValueError("tag effect 'add' must be a dict")
+
+        if "remove" in e:
+            if isinstance(e["remove"], list):
+                # Remove multiple tags
+                for key in e["remove"]:
+                    state.scene.tags.pop(key, None)
+            elif isinstance(e["remove"], str):
+                # Remove single tag
+                state.scene.tags.pop(e["remove"], None)
+            else:
+                raise ValueError("tag effect 'remove' must be a string or list")
+
+    else:
+        # Modify entity tags (if entities support tags in the future)
+        if target_id not in state.entities:
+            raise ValueError(f"Tag effect target not found: {target_id}")
+
+        entity = state.entities[target_id]
+
+        # For now, we'll add a tags attribute if it doesn't exist
+        if not hasattr(entity, "tags"):
+            # Add tags as a dynamic attribute (this is a simple approach)
+            entity.__dict__["tags"] = {}
+
+        if "add" in e:
+            if isinstance(e["add"], dict):
+                for key, value in e["add"].items():
+                    entity.__dict__["tags"][key] = value
+            else:
+                raise ValueError("tag effect 'add' must be a dict")
+
+        if "remove" in e:
+            if isinstance(e["remove"], list):
+                for key in e["remove"]:
+                    entity.__dict__["tags"].pop(key, None)
+            elif isinstance(e["remove"], str):
+                entity.__dict__["tags"].pop(e["remove"], None)
+            else:
+                raise ValueError("tag effect 'remove' must be a string or list")
+
+
+@effect("noise")
+def apply_noise(state: GameState, e: Dict[str, Any]) -> None:
+    """Apply noise effect for subsystem integration.
+
+    This is a passive effect that doesn't modify game state directly,
+    but allows other subsystems to subscribe to noise events.
+    """
+    # For now, this is a no-op effect that just validates structure
+    required_fields = ["zone", "intensity", "source"]
+    for field in required_fields:
+        if field not in e:
+            raise ValueError(f"noise effect missing required field: {field}")
+
+    # Validate intensity values
+    valid_intensities = ["quiet", "normal", "loud", "very_loud"]
+    if e["intensity"] not in valid_intensities:
+        raise ValueError(f"noise effect intensity must be one of: {valid_intensities}")
+
+    # In the future, this could:
+    # - Update zone noise levels
+    # - Trigger NPC awareness systems
+    # - Log events for replay systems
+    # - Advance detection clocks
+
+
 def get_registered_effects() -> List[str]:
     """Get list of all registered effect types."""
     return list(EFFECT_REGISTRY.keys())

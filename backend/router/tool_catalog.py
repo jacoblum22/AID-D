@@ -12,20 +12,24 @@ Each tool has:
 ✅ FULLY IMPLEMENTED:
 - ask_roll: Complete dice mechanics with Style+Domain system, DC derivation,
            effect generation, and comprehensive validation pipeline
+- narrate_only: Complete topic inference, sophisticated narration generation,
+                POV management, scene tag integration, and comprehensive testing
+- attack: Complete Style+Domain combat mechanics with damage calculation,
+          multiple damage expressions, mark consumption, sophisticated validation,
+          and comprehensive test coverage
+- move: Complete zone transition mechanics with method variants (walk/run/sneak),
+        adjacency validation, effect generation, and comprehensive test coverage
 
 🚧 PLACEHOLDER IMPLEMENTATIONS:
-- move: Basic zone transitions (minimal implementation)
-- attack: Simple combat mechanics (placeholder)
 - talk: Basic social interactions (placeholder)
 - use_item: Basic item usage (placeholder)
-- narrate_only: Scene narration (escape hatch)
 - get_info: State querying (basic implementation)
 - apply_effects: Direct effect application (utility)
 - ask_clarifying: Clarification requests (escape hatch)
 
 The placeholder tools provide basic functionality for testing and integration
-but lack the sophisticated mechanics that ask_roll has. They will be enhanced
-in future development phases.
+but lack the sophisticated mechanics that the fully implemented tools have.
+They will be enhanced in future development phases.
 """
 
 from typing import Dict, List, Optional, Any, Callable, Union, Literal, Annotated
@@ -57,8 +61,9 @@ class MoveArgs(ToolArgs):
     """Arguments for move tool."""
 
     actor: str
-    to: str
-    from_zone: Optional[str] = None
+    to: str  # zone id
+    method: Literal["walk", "run", "sneak"] = "walk"
+    cost: Optional[int] = None  # stamina/focus cost (future)
 
 
 class AttackArgs(ToolArgs):
@@ -140,26 +145,23 @@ def ask_roll_precond(state, utterance) -> bool:
 
 
 def move_precond(state, utterance) -> bool:
-    """move available when target zone is adjacent to current zone."""
+    """move available when actor exists and can move."""
     if not state.current_actor:
         return False
 
-    current_actor = state.actors.get(state.current_actor)
-    if not current_actor:
+    # Check if actor exists in the game state
+    current_actor = state.entities.get(state.current_actor)
+    if not current_actor or current_actor.type not in ("pc", "npc"):
         return False
 
+    # HP check removed - handled in execution logic for better error messages
+
+    # Check if there are any zones to move to
     current_zone = state.zones.get(current_actor.current_zone)
-    if not current_zone:
+    if not current_zone or not current_zone.adjacent_zones:
         return False
 
-    # Check if utterance mentions any adjacent zone
-    text_lower = utterance.text.lower()
-    for zone_id in current_zone.adjacent_zones:
-        zone = state.zones.get(zone_id)
-        if zone and (zone.name.lower() in text_lower or zone_id.lower() in text_lower):
-            return True
-
-    return False
+    return True
 
 
 def attack_precond(state, utterance) -> bool:
@@ -196,7 +198,7 @@ def talk_precond(state, utterance) -> bool:
     if not state.current_actor:
         return False  # No talk without current actor
 
-    current_actor = state.actors.get(state.current_actor)
+    current_actor = state.entities.get(state.current_actor)
     if not current_actor:
         return False
 
@@ -288,19 +290,20 @@ def suggest_ask_roll_args(state, utterance) -> Dict[str, Any]:
 
 
 def suggest_move_args(state, utterance) -> Dict[str, Any]:
-    """Suggest arguments for move based on available adjacent zones."""
+    """Suggest arguments for move with intelligent method detection."""
     args = {}
 
     if state.current_actor:
         args["actor"] = state.current_actor
-        current_actor = state.actors.get(state.current_actor)
+        # Use entities instead of actors for consistency
+        current_actor = state.entities.get(state.current_actor)
 
         if current_actor:
-            args["from_zone"] = current_actor.current_zone
             current_zone = state.zones.get(current_actor.current_zone)
 
             if current_zone:
                 text_lower = utterance.text.lower()
+
                 # Find which adjacent zone is mentioned
                 for zone_id in current_zone.adjacent_zones:
                     zone = state.zones.get(zone_id)
@@ -309,6 +312,23 @@ def suggest_move_args(state, utterance) -> Dict[str, Any]:
                     ):
                         args["to"] = zone_id
                         break
+
+                # Detect movement method from utterance
+                if any(
+                    word in text_lower
+                    for word in ["sneak", "stealth", "quietly", "careful"]
+                ):
+                    args["method"] = "sneak"
+                elif any(
+                    word in text_lower
+                    for word in ["run", "rush", "quickly", "fast", "sprint"]
+                ):
+                    args["method"] = "run"
+                else:
+                    args["method"] = "walk"
+
+                # Cost is optional for now
+                args["cost"] = None
 
     return args
 

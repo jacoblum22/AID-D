@@ -482,30 +482,261 @@ class Validator:
     def _execute_move(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute move tool - zone transitions."""
+        """Execute move tool - comprehensive zone transitions with validation."""
         actor = args.get("actor")
         to_zone = args.get("to")
-        from_zone = args.get("from_zone")
-        movement_style = args.get("movement_style", "normal")
+        method = args.get("method", "walk")
+        cost = args.get("cost")
 
-        effects = [{"type": "position", "target": actor, "to": to_zone}]
+        # Validation: Actor exists and can act
+        if not actor or actor not in state.entities:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": "Who should move? I don't see that character."},
+                facts={},
+                effects=[],
+                narration_hint={},
+            )
 
-        # Potential clock effects for movement
-        if movement_style == "fast":
-            effects.append({"type": "clock", "id": "scene.noise", "delta": 1})
+        actor_entity = state.entities[actor]
+        if actor_entity.type not in ("pc", "npc"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": "That entity cannot move."},
+                facts={},
+                effects=[],
+                narration_hint={},
+            )
+
+        # Check if actor can act (alive) - only check HP for PC/NPC entities
+        if actor_entity.type in ("pc", "npc"):
+            # Type cast for proper type checking
+            from .game_state import PC, NPC
+
+            living_entity = cast(Union[PC, NPC], actor_entity)
+
+            if hasattr(living_entity, "hp") and living_entity.hp.current <= 0:
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": f"{living_entity.name} is unconscious and cannot move."
+                    },
+                    facts={
+                        "cause": "actor_state",
+                        "actor_state": "unconscious",
+                        "actor": actor,
+                    },
+                    effects=[],
+                    narration_hint={},
+                )
+
+        current_zone_id = actor_entity.current_zone
+        current_zone = state.zones.get(current_zone_id)
+
+        if not current_zone:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": "Something is wrong with the current location."},
+                facts={},
+                effects=[],
+                narration_hint={},
+            )
+
+        # Validation: Target zone exists
+        if not to_zone or to_zone not in state.zones:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": f"I don't know where '{to_zone}' is."},
+                facts={},
+                effects=[],
+                narration_hint={},
+            )
+
+        target_zone = state.zones[to_zone]
+
+        # Validation: Same-zone move
+        if to_zone == current_zone_id:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"You're already in {current_zone.name}. Where would you like to go?"
+                },
+                facts={"cause": "same_zone", "current_zone": current_zone_id},
+                effects=[],
+                narration_hint={},
+            )
+
+        # Validation: Target zone is adjacent
+        if to_zone not in current_zone.adjacent_zones:
+            valid_exits = [
+                state.zones[zone_id].name
+                for zone_id in current_zone.adjacent_zones
+                if zone_id in state.zones
+            ]
+            exits_text = ", ".join(valid_exits) if valid_exits else "nowhere"
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"You can't move there from {current_zone.name}. Valid exits: {exits_text}."
+                },
+                facts={"cause": "invalid", "valid_exits": valid_exits},
+                effects=[],
+                narration_hint={},
+            )
+
+        # Validation: Path not blocked
+        blocked_exits = getattr(current_zone, "blocked_exits", [])
+        if to_zone in blocked_exits:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": f"The path to {target_zone.name} is blocked."},
+                facts={"cause": "blocked", "destination": to_zone},
+                effects=[],
+                narration_hint={},
+            )
+
+        # Special handling for sneak method
+        if method == "sneak":
+            # For now, we'll handle sneak as a simple move with a tag
+            # In the future, this could defer to ask_roll for stealth checks
+            # Return ask_roll deferred result if scene has high alert level
+            if hasattr(state, "scene") and hasattr(state.scene, "tags"):
+                alert_level = state.scene.tags.get("alert_level", 0)
+                if isinstance(alert_level, int) and alert_level > 1:
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_roll",
+                        args={
+                            "actor": actor,
+                            "action": "sneak",
+                            "zone_target": to_zone,
+                            "style": 1,
+                            "domain": "d6",
+                            "dc_hint": 10 + alert_level,
+                            "context": f"Moving stealthily to {target_zone.name}",
+                        },
+                        facts={},
+                        effects=[],
+                        narration_hint={},
+                    )
+
+        # Generate effects
+        effects = []
+
+        # Always emit position effect
+        effects.append(
+            {
+                "type": "position",
+                "target": actor,
+                "from": current_zone_id,
+                "to": to_zone,
+                "source": actor,
+                "cause": "move",
+            }
+        )
+
+        # Method-specific effects
+        facts = {
+            "from_zone": current_zone_id,
+            "to_zone": to_zone,
+            "destination": to_zone,  # For test compatibility
+            "method": method,
+            "actor": actor,
+            "cost": cost,  # Track cost even if not enforced
+        }
+
+        tone_tags = ["transition", "movement"]
+
+        if method == "run":
+            # Add noise tag/clock effect for running
+            effects.append(
+                {
+                    "type": "tag",
+                    "target": "scene",
+                    "add": {"noise": "loud"},
+                    "source": actor,
+                    "cause": "running",
+                }
+            )
+            # Generate generic noise event for subsystems
+            effects.append(
+                {
+                    "type": "noise",
+                    "zone": to_zone,
+                    "intensity": "loud",
+                    "source": actor,
+                    "cause": "running",
+                }
+            )
+            # Advance alarm clock if it exists
+            if "alarm" in state.clocks:
+                effects.append(
+                    {
+                        "type": "clock",
+                        "id": "alarm",  # Use "id" not "target" for clock effects
+                        "delta": 1,
+                        "source": actor,
+                        "cause": "noisy_movement",
+                    }
+                )
+            tone_tags.append("urgent")
+            facts["noise_generated"] = True
+
+        elif method == "sneak":
+            # Add sneak intent tag (not result - that comes from successful rolls)
+            effects.append(
+                {
+                    "type": "tag",
+                    "target": actor,
+                    "add": {"sneak_intent": True},
+                    "source": actor,
+                    "cause": "stealth_movement",
+                }
+            )
+            tone_tags.append("stealthy")
+            facts["sneak_intent"] = True
+
+        # Generate narration hint
+        method_verb = {"walk": "walks", "run": "runs", "sneak": "sneaks"}.get(
+            method, "moves"
+        )
+
+        # Build zone names mapping for narrator
+        zone_names = {
+            current_zone_id: current_zone.name,
+            to_zone: target_zone.name,
+        }
 
         narration_hint = {
-            "summary": f"Moved to {args.get('zone_name', to_zone)}",
-            "movement": {"from": from_zone, "to": to_zone, "style": movement_style},
-            "tone_tags": ["quiet"] if movement_style == "stealth" else ["active"],
+            "summary": f"{actor_entity.name} {method_verb} from {current_zone.name} to {target_zone.name}.",
+            "movement": {
+                "from": current_zone_id,
+                "to": to_zone,
+                "method": method,
+                "movement_verb": method_verb,
+                "from_name": current_zone.name,
+                "to_name": target_zone.name,
+            },
+            "tone_tags": tone_tags,
             "salient_entities": [actor],
+            "mentioned_zones": [current_zone_id, to_zone],
+            "zone_names": zone_names,
+            "camera": "tracking",
         }
 
         return ToolResult(
             ok=True,
             tool_id="move",
             args=args,
-            facts={"destination": to_zone, "movement_style": movement_style},
+            facts=facts,
             effects=effects,
             narration_hint=narration_hint,
         )

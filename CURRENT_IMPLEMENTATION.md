@@ -74,9 +74,24 @@ tests/           # Comprehensive test suite
 - Comprehensive test coverage
 - **Status**: Production ready
 
+#### ✅ **attack** (Fully Implemented)
+- Complete Style+Domain combat mechanics with damage calculation
+- Multiple damage expressions (1d6, 1d6+1, 2d4) and outcome bands
+- Mark consumption mechanics with advantage/disadvantage support
+- Sophisticated validation (dead targets, invisible targets, visibility checks)
+- Detailed narration hints with dice tracking and effect generation
+- Comprehensive test coverage with all edge cases
+- **Status**: Production ready
+
+#### ✅ **move** (Fully Implemented)
+- Complete zone transition mechanics with method variants (walk/run/sneak)
+- Adjacency validation with specific error messages for invalid moves
+- Effect generation for position changes, scene tags (noise), and clock advancement
+- Detailed narration hints with method-specific tone tags and camera angles
+- Comprehensive test coverage including validation, effects, and narration
+- **Status**: Production ready
+
 #### 🚧 **Placeholder Implementations:**
-- `move`: Basic zone transitions
-- `attack`: Simple combat mechanics  
 - `talk`: Basic social interactions
 - `use_item`: Basic item usage
 - `get_info`: State querying
@@ -149,6 +164,8 @@ tests/           # Comprehensive test suite
 **Test Coverage:**
 - `test_affordances.py`
 - `test_ask_roll.py` 
+- `test_attack.py`
+- `test_move.py`
 - `test_effects.py`
 - `test_game_state.py`
 - `test_narrate_only.py`
@@ -218,13 +235,13 @@ pytest>=7.0.0
 
 ### What Works Now
 - Game state management and entity modeling
-- Tool system with **two fully-featured tools** (`ask_roll` and `narrate_only`)
-- Effect system for state changes
+- Tool system with **four fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, and `move`)
+- Effect system for state changes including new tag effects
 - Validation and execution pipeline  
 - Comprehensive testing
 
 ### What's Ready for Enhancement
-- Tool implementations (move, attack, talk, etc. - 7 remaining placeholder tools)
+- Tool implementations (talk, use_item, etc. - 5 remaining placeholder tools)
 - Persistence and logging
 - World state management
 

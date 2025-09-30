@@ -87,7 +87,7 @@ def sample_utterance():
 
 
 # List of tools that are fully implemented and should be tested normally
-IMPLEMENTED_TOOLS = {"ask_roll"}
+IMPLEMENTED_TOOLS = {"ask_roll", "attack", "move"}
 
 # Get list of all tool IDs
 ALL_TOOL_IDS = {tool.id for tool in TOOL_CATALOG}
