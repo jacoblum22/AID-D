@@ -477,19 +477,21 @@ def suggest_ask_clarifying_args(state, utterance) -> Dict[str, Any]:
     # Set actor if available
     if state.current_actor:
         args["actor"] = state.current_actor
-    
+
     # Always start with look around option (safe fallback)
     options = []
-    options.append({
-        "id": "A",
-        "label": "Look around first",
-        "tool_id": "narrate_only",
-        "args_patch": {"topic": "look around"},
-        "category": "info",
-        "risk_hint": "safe",
-        "tags": ["observation", "safe"]
-    })
-    
+    options.append(
+        {
+            "id": "A",
+            "label": "Look around first",
+            "tool_id": "narrate_only",
+            "args_patch": {"topic": "look around"},
+            "category": "info",
+            "risk_hint": "safe",
+            "tags": ["observation", "safe"],
+        }
+    )
+
     # Try to add movement option if possible
     movement_added = False
     if state.current_actor:
@@ -500,29 +502,33 @@ def suggest_ask_clarifying_args(state, utterance) -> Dict[str, Any]:
                 first_adjacent = list(current_zone.adjacent_zones)[0]
                 adjacent_zone = state.zones.get(first_adjacent)
                 zone_name = adjacent_zone.name if adjacent_zone else first_adjacent
-                options.append({
-                    "id": "B", 
-                    "label": f"Move to {zone_name}",
-                    "tool_id": "move",
-                    "args_patch": {"to": first_adjacent},
-                    "category": "movement",
-                    "risk_hint": "safe",
-                    "tags": ["movement", "explore"]
-                })
+                options.append(
+                    {
+                        "id": "B",
+                        "label": f"Move to {zone_name}",
+                        "tool_id": "move",
+                        "args_patch": {"to": first_adjacent},
+                        "category": "movement",
+                        "risk_hint": "safe",
+                        "tags": ["movement", "explore"],
+                    }
+                )
                 movement_added = True
-                
+
     # Always ensure we have at least 2 options - add info option if no movement
     if not movement_added:
-        options.append({
-            "id": "B",
-            "label": "Get more information",
-            "tool_id": "get_info", 
-            "args_patch": {"query": "current situation", "scope": "current_zone"},
-            "category": "info",
-            "risk_hint": "safe",
-            "tags": ["information", "assessment"]
-        })
-                
+        options.append(
+            {
+                "id": "B",
+                "label": "Get more information",
+                "tool_id": "get_info",
+                "args_patch": {"query": "current situation", "scope": "current_zone"},
+                "category": "info",
+                "risk_hint": "safe",
+                "tags": ["information", "assessment"],
+            }
+        )
+
     args["options"] = options
 
     # Set default values

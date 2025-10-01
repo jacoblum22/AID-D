@@ -76,7 +76,7 @@ class Validator:
                 state.scene.round += 1
 
             state.current_actor = state.scene.turn_order[state.scene.turn_index]
-        
+
         # Reset clarification counter for new turn
         state.scene.choice_count_this_turn = 0
 
@@ -87,7 +87,9 @@ class Validator:
             > state.scene.pending_choice.get("expires_round", float("inf"))
         ):
             expired_choice_id = state.scene.pending_choice.get("id")
-            logger.info(f"Clearing expired pending choice {expired_choice_id} at round {state.scene.round}")
+            logger.info(
+                f"Clearing expired pending choice {expired_choice_id} at round {state.scene.round}"
+            )
             state.scene.pending_choice = None
 
     def maybe_consume_pending_choice(
