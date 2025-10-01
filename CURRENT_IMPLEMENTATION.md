@@ -43,6 +43,8 @@ tests/           # Comprehensive test suite
 
 **Scene Management:**
 - `Scene`: Turn order, round tracking, environmental tags (alert/lighting/noise/cover)
+- Pending choice system for ask_clarifying tool with expiration tracking
+- Clarification limit counter (max 3 per turn) with automatic reset
 - `GameState`: Central state container with entities, zones, scene, clocks
 
 **Features:**
@@ -91,12 +93,23 @@ tests/           # Comprehensive test suite
 - Comprehensive test coverage including validation, effects, and narration
 - **Status**: Production ready
 
+#### ✅ **ask_clarifying** (Fully Implemented)
+- Complete clarifying question system with 2-4 actionable options
+- Sophisticated option generation with UX metadata (category, risk_hint, tags)
+- Pending choice storage and consumption with expiration handling
+- Max 3 clarifications per turn with automatic fallback to narrate_only
+- Open choice philosophy - options as suggestions, not restrictions
+- Fuzzy matching for both exact IDs ("A", "B") and natural language
+- Smart argument merging with args_patch system for seamless tool chaining
+- Comprehensive replay metadata logging for deterministic reproduction
+- Enhanced narration hints with options_summary for clean UI presentation
+- **Status**: Production ready
+
 #### 🚧 **Placeholder Implementations:**
 - `talk`: Basic social interactions
 - `use_item`: Basic item usage
 - `get_info`: State querying
 - `apply_effects`: Direct effect application
-- `ask_clarifying`: Clarification requests
 
 **Features:**
 - Dynamic precondition checking
@@ -135,6 +148,8 @@ tests/           # Comprehensive test suite
 - Comprehensive error handling
 - JSON serializable results
 - Deterministic execution tracking
+- Pending choice consumption logic with fuzzy matching
+- Turn advancement with automatic cleanup and counter resets
 
 ### 5. Narration System (`narrate_only` tool)
 
@@ -166,6 +181,7 @@ tests/           # Comprehensive test suite
 - `test_ask_roll.py` 
 - `test_attack.py`
 - `test_move.py`
+- `test_ask_clarifying.py`
 - `test_effects.py`
 - `test_game_state.py`
 - `test_narrate_only.py`
@@ -235,13 +251,13 @@ pytest>=7.0.0
 
 ### What Works Now
 - Game state management and entity modeling
-- Tool system with **four fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, and `move`)
+- Tool system with **five fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, and `ask_clarifying`)
 - Effect system for state changes including new tag effects
-- Validation and execution pipeline  
+- Validation and execution pipeline with pending choice consumption
 - Comprehensive testing
 
 ### What's Ready for Enhancement
-- Tool implementations (talk, use_item, etc. - 5 remaining placeholder tools)
+- Tool implementations (talk, use_item, get_info, apply_effects - 4 remaining placeholder tools)
 - Persistence and logging
 - World state management
 
