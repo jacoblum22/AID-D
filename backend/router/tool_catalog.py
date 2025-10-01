@@ -117,10 +117,48 @@ class ApplyEffectsArgs(ToolArgs):
     effects: List[Dict[str, Any]]
 
 
+class ClarifyingOption(BaseModel):
+    """A single option for the ask_clarifying tool."""
+
+    id: str  # "A", "B", "C"
+    label: str  # Player-facing text
+    tool_id: Literal[
+        "ask_roll",
+        "move",
+        "attack",
+        "talk",
+        "use_item",
+        "get_info",
+        "narrate_only",
+        "apply_effects",
+    ]
+    args_patch: Dict[str, Any] = Field(
+        default_factory=dict
+    )  # patch merged into chosen tool's args
+
+    # UX metadata (doesn't affect execution)
+    category: Optional[str] = None  # "combat", "movement", "info", "social", etc.
+    risk_hint: Literal["safe", "risky", "unknown"] = "unknown"  # UI can shade options
+    tags: List[str] = Field(default_factory=list)  # descriptors for style knobs
+
+
 class AskClarifyingArgs(ToolArgs):
     """Arguments for ask_clarifying tool."""
 
     question: str
+    options: List[ClarifyingOption] = Field(min_length=2, max_length=4)
+    reason: Literal[
+        "ambiguous_intent",
+        "invalid_target",
+        "not_adjacent",
+        "not_your_turn",
+        "missing_arg",
+        "blocked_exit",
+        "unknown",
+    ] = "ambiguous_intent"
+    actor: Optional[str] = None  # helps Planner re-hydrate
+    context_note: Optional[str] = None  # optional extra hint for UI/logs
+    expires_in_turns: int = 1  # auto-clear after N turns
 
 
 class Tool(BaseModel):
@@ -429,6 +467,80 @@ def suggest_talk_args(state, utterance) -> Dict[str, Any]:
     return args
 
 
+def suggest_ask_clarifying_args(state, utterance) -> Dict[str, Any]:
+    """Suggest arguments for ask_clarifying based on common failure patterns."""
+    args = {}
+
+    # Set default question
+    args["question"] = "What would you like to do?"
+
+    # Set actor if available
+    if state.current_actor:
+        args["actor"] = state.current_actor
+        current_actor = state.entities.get(state.current_actor)
+
+        # Generate default options based on affordances
+        options = []
+
+        # Option A: Look around (always available)
+        options.append(
+            {
+                "id": "A",
+                "label": "Look around first",
+                "tool_id": "narrate_only",
+                "args_patch": {"topic": "look around"},
+                "category": "info",
+                "risk_hint": "safe",
+                "tags": ["observation", "safe"],
+            }
+        )
+
+        if current_actor:
+            current_zone = state.zones.get(current_actor.current_zone)
+
+            # Option B: Move to adjacent zone if available
+            if current_zone and current_zone.adjacent_zones:
+                first_adjacent = list(current_zone.adjacent_zones)[0]
+                adjacent_zone = state.zones.get(first_adjacent)
+                zone_name = adjacent_zone.name if adjacent_zone else first_adjacent
+                options.append(
+                    {
+                        "id": "B",
+                        "label": f"Move to {zone_name}",
+                        "tool_id": "move",
+                        "args_patch": {"to": first_adjacent},
+                        "category": "movement",
+                        "risk_hint": "safe",
+                        "tags": ["movement", "explore"],
+                    }
+                )
+
+            # Option C: Ask for info if no movement available
+            if len(options) == 1:  # Only look around so far
+                options.append(
+                    {
+                        "id": "B",
+                        "label": "Get more information",
+                        "tool_id": "get_info",
+                        "args_patch": {
+                            "query": "current situation",
+                            "scope": "current_zone",
+                        },
+                        "category": "info",
+                        "risk_hint": "safe",
+                        "tags": ["information", "assessment"],
+                    }
+                )
+
+        args["options"] = options
+
+    # Set default values
+    args.setdefault("reason", "ambiguous_intent")
+    args.setdefault("expires_in_turns", 1)
+
+    return args
+
+
 def suggest_narrate_only_args(state, utterance) -> Dict[str, Any]:
     """Suggest arguments for narrate_only based on topic inference heuristics."""
     args = {}
@@ -555,11 +667,9 @@ TOOL_CATALOG: List[Tool] = [
     ),
     Tool(
         id="ask_clarifying",
-        desc="Ask the player a short clarifying question.",
+        desc="Ask the player a short clarifying question with options.",
         precond=ask_clarifying_precond,
-        suggest_args=lambda state, utterance: {
-            "question": "Could you clarify what you'd like to do?"
-        },
+        suggest_args=suggest_ask_clarifying_args,
         args_schema=AskClarifyingArgs,
     ),
 ]

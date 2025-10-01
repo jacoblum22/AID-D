@@ -128,6 +128,8 @@ class Scene(BaseModel):
         }
     )
     objective: Dict[str, Any] = Field(default_factory=dict)
+    pending_choice: Optional[Dict[str, Any]] = None  # For ask_clarifying tool
+    choice_count_this_turn: int = 0  # Max 3 clarifications per turn
 
 
 class GameState(BaseModel):

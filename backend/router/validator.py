@@ -59,6 +59,164 @@ class Validator:
     def __init__(self):
         self.turn_counter = 0
 
+    def advance_turn(self, state: GameState) -> None:
+        """
+        Advance to the next turn and reset clarification counter.
+
+        This should be called by the game engine when turns advance.
+        """
+        # Reset clarification counter for new turn
+        state.scene.choice_count_this_turn = 0
+
+        # Clear any expired pending choices
+        if (
+            state.scene.pending_choice
+            and state.scene.round
+            > state.scene.pending_choice.get("expires_round", float("inf"))
+        ):
+            state.scene.pending_choice = None
+
+        # Advance turn logic (if needed for turn order)
+        if state.scene.turn_order:
+            state.scene.turn_index = (state.scene.turn_index + 1) % len(
+                state.scene.turn_order
+            )
+
+            # Update current actor if turn order exists
+            if state.scene.turn_index == 0:
+                state.scene.round += 1
+
+            state.current_actor = state.scene.turn_order[state.scene.turn_index]
+
+    def maybe_consume_pending_choice(
+        self, state: GameState, utterance: Utterance
+    ) -> Optional[tuple[str, Dict[str, Any]]]:
+        """
+        Check if there's a pending choice and if user input matches one of the options.
+
+        Returns:
+            tuple of (tool_id, args) if a choice was consumed, None otherwise
+        """
+        # Check if there's a pending choice
+        pc = state.scene.pending_choice
+        if not pc:
+            return None
+
+        # Check if choice has expired
+        if state.scene.round > pc.get("expires_round", float("inf")):
+            # Log the expiration for debugging
+            logger.info(
+                f"Pending choice {pc.get('id')} expired at round {state.scene.round}"
+            )
+
+            # Store expiration info before clearing
+            expired_info = {
+                "pending_choice_id": pc.get("id"),
+                "expired": True,
+                "reason": "turn_timeout",
+                "expired_at_round": state.scene.round,
+                "original_expires_round": pc.get("expires_round"),
+            }
+
+            # Clear expired choice
+            state.scene.pending_choice = None
+
+            # Could optionally return the expiration info for logging/debugging
+            # For now, just return None to proceed with normal planning
+            return None
+
+        # Try to match user input to one of the options
+        user_text = utterance.text.lower().strip()
+        matched_option = None
+
+        # Check for exact ID match first (e.g., "A", "B", "C")
+        for option in pc["options"]:
+            if user_text == option["id"].lower():
+                matched_option = option
+                break
+
+        # If no ID match, try to match labels (fuzzy matching)
+        if not matched_option:
+            for option in pc["options"]:
+                label_lower = option["label"].lower()
+                # Simple fuzzy matching - check if key words from label appear in user text
+                label_words = label_lower.split()
+                if any(word in user_text for word in label_words if len(word) > 2):
+                    matched_option = option
+                    break
+
+        # If no match found, return None (let normal planning proceed)
+        if not matched_option:
+            return None
+
+        # Build the tool call arguments
+        tool_id = matched_option["tool_id"]
+
+        # Get base args from the tool's suggest_args if available
+        from .tool_catalog import get_tool_by_id
+
+        tool = get_tool_by_id(tool_id)
+        base_args = {}
+        if tool and tool.suggest_args:
+            try:
+                base_args = tool.suggest_args(state, utterance)
+            except Exception as e:
+                logger.warning(f"Error getting base args for {tool_id}: {e}")
+
+        # Merge in the args_patch from the option
+        args_patch = matched_option.get("args_patch", {})
+        final_args = {**base_args, **args_patch}
+
+        # Clear the pending choice since it was consumed
+        state.scene.pending_choice = None
+
+        # Log the choice consumption with replay metadata
+        choice_metadata = {
+            "pending_choice_id": pc["id"],
+            "user_input": user_text,
+            "matched_option": {
+                "id": matched_option["id"],
+                "label": matched_option["label"],
+                "tool_id": matched_option["tool_id"],
+            },
+            "all_options_shown": [
+                {"id": opt["id"], "label": opt["label"], "tool_id": opt["tool_id"]}
+                for opt in pc["options"]
+            ],
+            "final_tool_call": {"tool_id": tool_id, "args": final_args},
+        }
+
+        logger.info(f"Consumed pending choice: {json.dumps(choice_metadata)}")
+
+        return (tool_id, final_args)
+
+    def process_turn_with_pending_choice_check(
+        self,
+        tool_id: str,
+        raw_args: Dict[str, Any],
+        state: GameState,
+        utterance: Utterance,
+        seed: Optional[int] = None,
+    ) -> ToolResult:
+        """
+        Process a turn with automatic pending choice consumption.
+
+        If a pending choice exists and matches the user input, execute that instead.
+        Otherwise, proceed with the normal tool execution pipeline.
+        """
+        # First check if there's a pending choice that matches user input
+        pending_choice_result = self.maybe_consume_pending_choice(state, utterance)
+
+        if pending_choice_result:
+            # User input matched a pending choice option
+            consumed_tool_id, consumed_args = pending_choice_result
+            return self.validate_and_execute(
+                consumed_tool_id, consumed_args, state, utterance, seed
+            )
+        else:
+            # No pending choice match, proceed with normal tool execution
+            return self.validate_and_execute(tool_id, raw_args, state, utterance, seed)
+
     def validate_and_execute(
         self,
         tool_id: str,
@@ -1391,20 +1549,165 @@ class Validator:
     def _execute_ask_clarifying(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute ask_clarifying tool."""
-        question = args.get("question", "Could you clarify what you'd like to do?")
+        """Execute ask_clarifying tool - creates a pending choice for later resolution."""
+        import uuid
+
+        # Check if we've exceeded max clarifications per turn
+        if state.scene.choice_count_this_turn >= 3:
+            # Clear any pending choice and fall back to narrate_only
+            state.scene.pending_choice = None
+
+            return ToolResult(
+                ok=True,
+                tool_id="narrate_only",
+                args={"topic": "hesitation", "actor": state.current_actor},
+                facts={
+                    "clarification_limit_reached": True,
+                    "max_clarifications": 3,
+                    "fallback_reason": "You hesitate, unsure what to do next.",
+                },
+                effects=[],
+                narration_hint={
+                    "summary": "You hesitate, unsure what to do next.",
+                    "tone_tags": ["neutral", "reflective"],
+                    "sentences_max": 1,
+                    "salient_entities": (
+                        [state.current_actor] if state.current_actor else []
+                    ),
+                },
+            )
+
+        # Extract arguments with validation
+        question = args.get("question", "What would you like to do?")
+        options_raw = args.get("options", [])
+        reason = args.get("reason", "ambiguous_intent")
+        actor = args.get("actor") or state.current_actor
+        context_note = args.get("context_note")
+        expires_in_turns = args.get("expires_in_turns", 1)
+
+        # Validate we have proper options
+        if not options_raw or len(options_raw) < 2:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args=args,
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Failed to create clarifying question - need at least 2 options",
+                    "tone_tags": ["error"],
+                    "salient_entities": [],
+                },
+                error_message="ask_clarifying requires at least 2 options",
+            )
+
+        # Validate option ids are unique
+        option_ids = [opt.get("id") for opt in options_raw]
+        if len(set(option_ids)) != len(option_ids):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args=args,
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Failed to create clarifying question - option IDs must be unique",
+                    "tone_tags": ["error"],
+                    "salient_entities": [],
+                },
+                error_message="Option IDs must be unique",
+            )
+
+        # Validate tool_ids are recognized
+        valid_tool_ids = {
+            "ask_roll",
+            "move",
+            "attack",
+            "talk",
+            "use_item",
+            "get_info",
+            "narrate_only",
+            "apply_effects",
+        }
+        for opt in options_raw:
+            if opt.get("tool_id") not in valid_tool_ids:
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args=args,
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": f"Failed to create clarifying question - invalid tool_id: {opt.get('tool_id')}",
+                        "tone_tags": ["error"],
+                        "salient_entities": [],
+                    },
+                    error_message=f"Invalid tool_id: {opt.get('tool_id')}",
+                )
+
+        # Increment clarification counter
+        state.scene.choice_count_this_turn += 1
+
+        # Generate unique pending choice ID
+        pc_id = f"pc_{uuid.uuid4().hex[:6]}"
+        expires_round = state.scene.round + expires_in_turns
+
+        # Create pending choice structure
+        pending_choice = {
+            "id": pc_id,
+            "actor": actor,
+            "question": question,
+            "options": options_raw,
+            "reason": reason,
+            "expires_round": expires_round,
+            "created_turn": state.scene.choice_count_this_turn,
+        }
+
+        if context_note:
+            pending_choice["context_note"] = context_note
+
+        # Store pending choice in scene state
+        state.scene.pending_choice = pending_choice
+
+        # Create a user-friendly options summary for narration
+        options_text = " or ".join(
+            [f"({opt['id']}) {opt['label']}" for opt in options_raw]
+        )
+        interactive_summary = f"{question} {options_text}"
+
+        # Create options summary for cleaner presentation
+        options_summary = [f"{opt['id']}: {opt['label']}" for opt in options_raw]
+
+        # Create narration hint
+        narration_hint = {
+            "summary": interactive_summary,
+            "options_summary": options_summary,
+            "tone_tags": ["interactive", "concise"],
+            "sentences_max": 1,
+            "salient_entities": [actor] if actor else [],
+        }
+
+        # Return facts containing the pending choice metadata
+        facts = {
+            "pending_choice_id": pc_id,
+            "actor": actor,
+            "question": question,
+            "options": [
+                {"id": opt["id"], "label": opt["label"], "tool_id": opt["tool_id"]}
+                for opt in options_raw
+            ],
+            "reason": reason,
+            "clarification_number": state.scene.choice_count_this_turn,
+            "open_choice": True,  # Options are suggestions, not restrictions
+        }
 
         return ToolResult(
             ok=True,
             tool_id="ask_clarifying",
             args=args,
-            facts={"question": question},
-            effects=[],
-            narration_hint={
-                "summary": "Asked for clarification",
-                "tone_tags": ["helpful"],
-                "salient_entities": [],
-            },
+            facts=facts,
+            effects=[],  # No state mutation beyond storing pending_choice
+            narration_hint=narration_hint,
         )
 
     def _create_error_result(
