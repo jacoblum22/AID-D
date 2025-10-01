@@ -228,32 +228,34 @@ def apply_tag(state: GameState, e: Dict[str, Any]) -> None:
                 raise ValueError("tag effect 'remove' must be a string or list")
 
     else:
-        # Modify entity tags (if entities support tags in the future)
+        # Modify entity tags
         if target_id not in state.entities:
             raise ValueError(f"Tag effect target not found: {target_id}")
 
         entity = state.entities[target_id]
 
-        # For now, we'll add a tags attribute if it doesn't exist
-        if not hasattr(entity, "tags"):
-            # Add tags as a dynamic attribute (this is a simple approach)
-            entity.__dict__["tags"] = {}
+        # Get current tags (will be empty dict by default from BaseEntity)
+        current_tags = entity.tags.copy()
 
         if "add" in e:
             if isinstance(e["add"], dict):
                 for key, value in e["add"].items():
-                    entity.__dict__["tags"][key] = value
+                    current_tags[key] = value
             else:
                 raise ValueError("tag effect 'add' must be a dict")
 
         if "remove" in e:
             if isinstance(e["remove"], list):
                 for key in e["remove"]:
-                    entity.__dict__["tags"].pop(key, None)
+                    current_tags.pop(key, None)
             elif isinstance(e["remove"], str):
-                entity.__dict__["tags"].pop(e["remove"], None)
+                current_tags.pop(e["remove"], None)
             else:
                 raise ValueError("tag effect 'remove' must be a string or list")
+
+        # Update entity using Pydantic's copy mechanism
+        updated_entity = entity.model_copy(update={"tags": current_tags})
+        state.entities[target_id] = updated_entity
 
 
 @effect("noise")
