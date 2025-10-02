@@ -1,0 +1,312 @@
+{
+  "intents": {
+    "persuade": {
+      "description": "Attempt to convince through reasoning and appeal",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "favor",
+              "value": 1
+            }
+          ],
+          "description": "Completely convinced, gains strong favor"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Convinced, becomes more receptive"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "clock",
+              "id_suffix": "persuade",
+              "delta": 1,
+              "max": 3
+            }
+          ],
+          "description": "Partially swayed, progress toward convincing"
+        },
+        "fail": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": 1
+            }
+          ],
+          "description": "Unconvinced, becomes more resistant"
+        }
+      }
+    },
+    "intimidate": {
+      "description": "Attempt to influence through fear and threat",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "fear",
+              "value": 1
+            }
+          ],
+          "description": "Terrified, gains strong fear mark"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Intimidated, becomes more compliant"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "clock",
+              "id_suffix": "fear",
+              "delta": 1,
+              "max": 4
+            }
+          ],
+          "description": "Somewhat fearful, building intimidation"
+        },
+        "fail": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": 1
+            }
+          ],
+          "description": "Defiant, angered by threats"
+        }
+      }
+    },
+    "deceive": {
+      "description": "Attempt to mislead through lies and misdirection",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "deception",
+              "value": 1
+            }
+          ],
+          "description": "Completely fooled, believes deception"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "clock",
+              "id_suffix": "lie",
+              "delta": 1,
+              "max": 2
+            }
+          ],
+          "description": "Temporarily deceived, lie may be discovered"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": 1
+            }
+          ],
+          "description": "Suspicious, harder to deceive"
+        },
+        "fail": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": 1
+            }
+          ],
+          "description": "Sees through lie, becomes more cautious"
+        }
+      }
+    },
+    "charm": {
+      "description": "Attempt to influence through appeal and attraction",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "charmed",
+              "value": 1
+            }
+          ],
+          "description": "Enchanted, finds speaker attractive"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Charmed, becomes more favorable"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "clock",
+              "id_suffix": "charm",
+              "delta": 1,
+              "max": 3
+            }
+          ],
+          "description": "Mildly charmed, building attraction"
+        },
+        "fail": {
+          "effects": [],
+          "description": "Unimpressed, no effect"
+        }
+      }
+    },
+    "comfort": {
+      "description": "Attempt to soothe and provide emotional support",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "bond",
+              "value": 1
+            }
+          ],
+          "description": "Deeply comforted, forms emotional bond"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Comforted, becomes more trusting"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "clock",
+              "id_suffix": "comfort",
+              "delta": 1,
+              "max": 3
+            }
+          ],
+          "description": "Partially soothed, building comfort"
+        },
+        "fail": {
+          "effects": [],
+          "description": "Still distressed, no improvement"
+        }
+      }
+    },
+    "request": {
+      "description": "Attempt to ask for help or favor",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "obligated",
+              "value": 1
+            }
+          ],
+          "description": "Feels strong obligation to help"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Willing to consider helping"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "clock",
+              "id_suffix": "request",
+              "delta": 1,
+              "max": 3
+            }
+          ],
+          "description": "Considering the request"
+        },
+        "fail": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": 1
+            }
+          ],
+          "description": "Annoyed by request, less helpful"
+        }
+      }
+    },
+    "distract": {
+      "description": "Attempt to divert attention or confuse",
+      "outcomes": {
+        "crit_success": {
+          "effects": [
+            {
+              "type": "mark",
+              "tag": "distracted",
+              "value": 1
+            }
+          ],
+          "description": "Completely distracted, loses focus"
+        },
+        "success": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Distracted, attention divided"
+        },
+        "partial": {
+          "effects": [
+            {
+              "type": "guard",
+              "delta": -1,
+              "min_value": 0
+            }
+          ],
+          "description": "Mildly distracted, slightly unfocused"
+        },
+        "fail": {
+          "effects": [],
+          "description": "Maintains focus, unaffected"
+        }
+      }
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "description": "Data-driven social interaction outcome mappings for AID&D",
+    "notes": [
+      "Effects are applied to each target in multi-target interactions",
+      "Guard deltas are cumulative with current guard value",
+      "Clock max values determine when progress 'fills the bar'",
+      "Mark values can stack with existing marks of same tag"
+    ]
+  }
+}

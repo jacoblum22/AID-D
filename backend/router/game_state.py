@@ -66,6 +66,9 @@ class PC(BaseEntity):
     guard_duration: int = 0
     style_bonus: int = 0
     mark_consumes: bool = True
+    marks: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # New flexible marks system
 
 
 class NPC(BaseEntity):
@@ -85,6 +88,9 @@ class NPC(BaseEntity):
     guard_duration: int = 0
     style_bonus: int = 0
     mark_consumes: bool = True
+    marks: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # New flexible marks system
 
 
 class ObjectEntity(BaseEntity):

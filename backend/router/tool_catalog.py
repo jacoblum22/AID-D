@@ -83,10 +83,18 @@ class AttackArgs(ToolArgs):
 class TalkArgs(ToolArgs):
     """Arguments for talk tool."""
 
-    actor: str
-    target: str
-    message: Optional[str] = None
-    tone: str = "neutral"
+    actor: str  # who is talking
+    target: Union[
+        str, List[str]
+    ]  # NPC/PC id(s) being addressed - supports multiple targets
+    intent: Literal[
+        "persuade", "intimidate", "deceive", "charm", "comfort", "request", "distract"
+    ] = "persuade"
+    style: Annotated[int, Field(ge=0, le=3)] = 1
+    domain: Literal["d4", "d6", "d8"] = "d6"
+    dc_hint: Annotated[int, Field(ge=8, le=22)] = 12  # target's willpower/social DC
+    adv_style_delta: Annotated[int, Field(ge=-1, le=1)] = 0
+    topic: Optional[str] = None  # e.g. "secret entrance"
 
 
 class UseItemArgs(ToolArgs):
@@ -232,19 +240,24 @@ def attack_precond(state, utterance) -> bool:
 
 
 def talk_precond(state, utterance) -> bool:
-    """talk available when there's a current actor who hasn't talked this turn."""
+    """talk available when there's a visible PC/NPC target."""
     if not state.current_actor:
-        return False  # No talk without current actor
-
-    current_actor = state.entities.get(state.current_actor)
-    if not current_actor:
         return False
 
-    # Check if actor has already talked this turn
-    return not (
-        hasattr(current_actor, "has_talked_this_turn")
-        and current_actor.has_talked_this_turn
-    )
+    current_actor = state.entities.get(state.current_actor)
+    if not current_actor or current_actor.type not in ("pc", "npc"):
+        return False
+
+    # HP check removed - handled in execution logic for better error messages
+
+    # Check for visible social targets (PCs/NPCs are social_receptive by default)
+    if hasattr(current_actor, "visible_actors"):
+        for actor_id in current_actor.visible_actors:
+            target = state.entities.get(actor_id)
+            if target and target.type in ("pc", "npc"):
+                return True
+
+    return False
 
 
 def use_item_precond(state, utterance) -> bool:
@@ -439,30 +452,170 @@ def suggest_use_item_args(state, utterance) -> Dict[str, Any]:
 
 
 def suggest_talk_args(state, utterance) -> Dict[str, Any]:
-    """Suggest arguments for talk based on visible actors."""
+    """Suggest arguments for talk based on visible actors and utterance content."""
     args = {}
 
     if state.current_actor:
         args["actor"] = state.current_actor
-        current_actor = state.actors.get(state.current_actor)
+        current_actor = state.entities.get(state.current_actor)
 
         if (
             current_actor
             and hasattr(current_actor, "visible_actors")
             and current_actor.visible_actors
         ):
-            args["target"] = current_actor.visible_actors[0]
+            # Find all PC/NPC targets (social_receptive by default)
+            potential_targets = []
+            for actor_id in current_actor.visible_actors:
+                target = state.entities.get(actor_id)
+                if target and target.type in ("pc", "npc"):
+                    potential_targets.append(actor_id)
 
-        # Detect tone from utterance
+            if potential_targets:
+                # For now, default to single target (first found)
+                # But system now supports multiple targets
+                args["target"] = potential_targets[0]
+
+                # If there are multiple targets, could suggest group interaction
+                if len(potential_targets) > 1:
+                    # Could add metadata about available group targets
+                    args["available_group_targets"] = potential_targets
+
+                # Try to estimate DC from target's will/stats if available
+                primary_target = state.entities.get(potential_targets[0])
+                if primary_target:
+                    if hasattr(primary_target, "stats") and hasattr(
+                        primary_target.stats, "will"
+                    ):
+                        args["dc_hint"] = max(8, min(22, primary_target.stats.will))
+                    elif hasattr(primary_target, "will"):
+                        args["dc_hint"] = max(8, min(22, primary_target.will))
+
+        # Broader Intent Ontology - map arbitrary verbs to the 7 core intents
         text_lower = utterance.text.lower()
-        if any(word in text_lower for word in ["angry", "shout", "yell"]):
-            args["tone"] = "aggressive"
-        elif any(word in text_lower for word in ["whisper", "quiet", "soft"]):
-            args["tone"] = "calm"
-        elif any(word in text_lower for word in ["friendly", "smile", "kind"]):
-            args["tone"] = "friendly"
-        else:
-            args["tone"] = "neutral"
+
+        # Verb mapping for comprehensive intent detection
+        verb_mappings = {
+            "intimidate": [
+                "threaten",
+                "intimidate",
+                "menace",
+                "scare",
+                "bully",
+                "frighten",
+                "terrorize",
+                "coerce",
+                "force",
+                "pressure",
+                "strong-arm",
+                "browbeat",
+            ],
+            "deceive": [
+                "lie",
+                "deceive",
+                "trick",
+                "bluff",
+                "mislead",
+                "fool",
+                "dupe",
+                "con",
+                "scam",
+                "bamboozle",
+                "hoodwink",
+                "fabricate",
+            ],
+            "charm": [
+                "charm",
+                "flirt",
+                "seduce",
+                "enchant",
+                "captivate",
+                "allure",
+                "entice",
+                "bewitch",
+                "dazzle",
+                "entrance",
+            ],
+            "comfort": [
+                "comfort",
+                "console",
+                "reassure",
+                "calm",
+                "soothe",
+                "pacify",
+                "support",
+                "encourage",
+                "nurture",
+                "ease",
+                "relieve",
+            ],
+            "distract": [
+                "distract",
+                "divert",
+                "misdirect",
+                "deflect",
+                "sidetrack",
+                "redirect",
+                "confuse",
+                "bewilder",
+            ],
+            "request": [
+                "ask",
+                "request",
+                "beg",
+                "plea",
+                "plead",
+                "implore",
+                "beseech",
+                "petition",
+                "appeal",
+                "solicit",
+                "entreat",
+                "supplicate",
+            ],
+            "persuade": [
+                "persuade",
+                "convince",
+                "argue",
+                "reason",
+                "debate",
+                "negotiate",
+                "influence",
+                "sway",
+                "urge",
+                "coax",
+                "cajole",
+                "wheedle",
+                "talk into",
+                "win over",
+                "bring around",
+            ],
+        }
+
+        # Find best matching intent based on word boundary matching to avoid substring issues
+        detected_intent = "persuade"  # Default
+        for intent, verbs in verb_mappings.items():
+            if any(
+                f" {verb} " in f" {text_lower} "
+                or text_lower.startswith(f"{verb} ")
+                or text_lower.endswith(f" {verb}")
+                or text_lower == verb
+                for verb in verbs
+            ):
+                detected_intent = intent
+                break
+
+        args["intent"] = detected_intent
+
+        about_match = re.search(r"\babout\s+([^.!?]+)", text_lower)
+        if about_match:
+            args["topic"] = about_match.group(1).strip()
+
+        # Set reasonable defaults
+        args.setdefault("style", 1)
+        args.setdefault("domain", "d6")
+        args.setdefault("dc_hint", 12)
+        args.setdefault("adv_style_delta", 0)
 
     return args
 

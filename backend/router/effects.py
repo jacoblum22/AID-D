@@ -74,19 +74,76 @@ def apply_position(state: GameState, e: Dict[str, Any]) -> None:
 
 @effect("clock")
 def apply_clock(state: GameState, e: Dict[str, Any]) -> None:
-    """Update a clock value."""
+    """Update a clock value with enhanced tracking.
+
+    Enhanced format supports:
+    {"type":"clock","id":"npc.guard.persuade","delta":1,"max":3,"source":"pc.arin"}
+    """
     clock_id = e["id"]
     delta = e["delta"]
+    source = e.get("source", "unknown")
+    max_value = e.get("max", 10)  # Default max for backwards compatibility
 
-    # Initialize this clock if not present
+    # Initialize this clock if not present with enhanced structure
     if clock_id not in state.clocks:
-        state.clocks[clock_id] = {"value": 0, "min": 0, "max": 10}  # Default range
+        state.clocks[clock_id] = {
+            "value": 0,
+            "min": 0,
+            "max": max_value,
+            "source": source,
+            "created_turn": state.scene.round,
+            "last_modified_turn": state.scene.round,
+            "last_modified_by": source,
+        }
 
     clock = state.clocks[clock_id]
+
+    # Migrate legacy clocks to enhanced structure if needed
+    if "min" not in clock:
+        clock["min"] = 0
+    if "max" not in clock:
+        clock["max"] = max_value
+    if "source" not in clock:
+        clock["source"] = source
+    if "created_turn" not in clock:
+        clock["created_turn"] = state.scene.round
+    if "last_modified_turn" not in clock:
+        clock["last_modified_turn"] = state.scene.round
+    if "last_modified_by" not in clock:
+        clock["last_modified_by"] = source
+
+    # Capture current state before any modifications for filled detection
+    old_value = clock["value"]
+    old_max = clock["max"]
+
+    # Update max if provided (allows for dynamic adjustment)
+    if "max" in e:
+        clock["max"] = max_value
+
+    # Update tracking metadata
+    clock["last_modified_turn"] = state.scene.round
+    clock["last_modified_by"] = source
+
+    # Apply delta
     clock["value"] += delta
 
     # Clamp to min/max
     clock["value"] = max(clock["min"], min(clock["max"], clock["value"]))
+
+    # Track if clock reached max (filled the bar) this turn
+    # Use old_max for consistent filled detection regardless of dynamic max changes
+    was_filled_before = old_value >= old_max
+    is_filled_now = clock["value"] >= clock["max"]
+
+    if not was_filled_before and is_filled_now:
+        # Clock was just filled this turn
+        clock["filled_this_turn"] = True
+        clock["filled_by"] = source
+    elif was_filled_before and not is_filled_now:
+        # Clock was reset/reduced from filled state
+        clock.pop("filled_this_turn", None)
+        clock.pop("filled_by", None)
+    # If clock was already filled and stays filled, preserve existing filled_this_turn status
 
 
 @effect("guard")
@@ -115,7 +172,11 @@ def apply_guard(state: GameState, e: Dict[str, Any]) -> None:
 
 @effect("mark")
 def apply_mark(state: GameState, e: Dict[str, Any]) -> None:
-    """Apply a mark/bonus to a living entity or remove marks."""
+    """Apply a mark/bonus to a living entity or remove marks.
+
+    Supports both legacy format (style_bonus) and new flexible format (tag-based).
+    New format: {"type":"mark","target":"npc.guard","tag":"favor","source":"pc.arin"}
+    """
     target_id = e["target"]
 
     if target_id in state.entities:
@@ -130,21 +191,59 @@ def apply_mark(state: GameState, e: Dict[str, Any]) -> None:
 
         # Check if this is a removal operation
         if e.get("remove", False):
-            # Remove all marks by setting style_bonus to 0
-            updated_entity = living_entity.model_copy(
-                update={"style_bonus": 0, "mark_consumes": True}
-            )
-        else:
-            # Add mark as before
-            style_bonus = e["style_bonus"]
-            consumes = e.get("consumes", True)
+            if e.get("tag"):
+                # New format: Remove specific tag-based mark
+                source = e.get("source")
+                if not source:
+                    raise ValueError(
+                        "Tag-based mark removal requires 'source' to be specified"
+                    )
 
-            updated_entity = living_entity.model_copy(
-                update={
-                    "style_bonus": living_entity.style_bonus + style_bonus,
-                    "mark_consumes": consumes,
+                current_marks = getattr(living_entity, "marks", {}).copy()
+                mark_key = f"{source}.{e['tag']}"
+                current_marks.pop(mark_key, None)
+                updated_entity = living_entity.model_copy(
+                    update={"marks": current_marks}
+                )
+            else:
+                # Legacy: Remove all marks by setting style_bonus to 0
+                updated_entity = living_entity.model_copy(
+                    update={"style_bonus": 0, "mark_consumes": True}
+                )
+        else:
+            # Check for new flexible format vs legacy format
+            if "tag" in e:
+                # New flexible format
+                tag = e["tag"]
+                source = e.get("source", "unknown")
+                mark_key = f"{source}.{tag}"
+
+                # Get current marks (initialize if not present)
+                current_marks = getattr(living_entity, "marks", {}).copy()
+
+                # Add new mark with metadata
+                current_marks[mark_key] = {
+                    "tag": tag,
+                    "source": source,
+                    "value": e.get("value", 1),  # Default mark strength
+                    "consumes": e.get("consumes", True),
+                    "created_turn": state.scene.round,
                 }
-            )
+
+                updated_entity = living_entity.model_copy(
+                    update={"marks": current_marks}
+                )
+            else:
+                # Legacy format for backwards compatibility
+                style_bonus = e["style_bonus"]
+                consumes = e.get("consumes", True)
+
+                updated_entity = living_entity.model_copy(
+                    update={
+                        "style_bonus": living_entity.style_bonus + style_bonus,
+                        "mark_consumes": consumes,
+                    }
+                )
 
         state.entities[target_id] = updated_entity
 
