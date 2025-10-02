@@ -13,6 +13,7 @@ import time
 import uuid
 import random
 import logging
+import os
 from typing import Dict, Any, List, Optional, Union, cast
 from pydantic import BaseModel, ValidationError
 from dataclasses import dataclass
@@ -58,6 +59,180 @@ class Validator:
 
     def __init__(self):
         self.turn_counter = 0
+        self.social_outcomes = self._load_social_outcomes()
+
+    def _load_social_outcomes(self) -> Dict[str, Any]:
+        """Load social outcomes configuration from JSON file."""
+        try:
+            # Look for social_outcomes.json in parent directory of backend
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(os.path.dirname(current_dir))
+            outcomes_path = os.path.join(parent_dir, "social_outcomes.json")
+
+            with open(outcomes_path, "r") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.warning(
+                "social_outcomes.json not found, using fallback hardcoded outcomes"
+            )
+            return self._get_fallback_outcomes()
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing social_outcomes.json: {e}")
+            return self._get_fallback_outcomes()
+
+    def _get_fallback_outcomes(self) -> Dict[str, Any]:
+        """Fallback hardcoded outcomes if JSON file not available."""
+        return {
+            "intents": {
+                "persuade": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "favor", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [{"type": "guard", "delta": -1, "min_value": 0}]
+                        },
+                        "partial": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "persuade",
+                                    "delta": 1,
+                                    "max": 3,
+                                }
+                            ]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+                "intimidate": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "fear", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [{"type": "guard", "delta": -1, "min_value": 0}]
+                        },
+                        "partial": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "fear",
+                                    "delta": 1,
+                                    "max": 4,
+                                }
+                            ]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+                "deceive": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "deception", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "lie",
+                                    "delta": 1,
+                                    "max": 2,
+                                }
+                            ]
+                        },
+                        "partial": {
+                            "effects": [{"type": "guard", "delta": 1}]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+                "charm": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "charm", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [{"type": "guard", "delta": -1, "min_value": 0}]
+                        },
+                        "partial": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "charm",
+                                    "delta": 1,
+                                    "max": 3,
+                                }
+                            ]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+                "comfort": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "comfort", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [{"type": "guard", "delta": -1, "min_value": 0}]
+                        },
+                        "partial": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "comfort",
+                                    "delta": 1,
+                                    "max": 3,
+                                }
+                            ]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+                "request": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "favor", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [{"type": "guard", "delta": -1, "min_value": 0}]
+                        },
+                        "partial": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "request",
+                                    "delta": 1,
+                                    "max": 3,
+                                }
+                            ]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+                "distract": {
+                    "outcomes": {
+                        "crit_success": {
+                            "effects": [{"type": "mark", "tag": "distraction", "value": 1}]
+                        },
+                        "success": {
+                            "effects": [{"type": "guard", "delta": -1, "min_value": 0}]
+                        },
+                        "partial": {
+                            "effects": [
+                                {
+                                    "type": "clock",
+                                    "id_suffix": "distraction",
+                                    "delta": 1,
+                                    "max": 3,
+                                }
+                            ]
+                        },
+                        "fail": {"effects": [{"type": "guard", "delta": 1}]},
+                    }
+                },
+            }
+        }
 
     def advance_turn(self, state: GameState) -> None:
         """
@@ -906,42 +1081,475 @@ class Validator:
     def _execute_talk(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute talk tool - social interactions."""
+        """Execute talk tool - social interactions with Style+Domain mechanics."""
+        import random
+
+        random.seed(seed)
+
+        # Extract arguments - handle both single target and multiple targets
         actor = args.get("actor")
-        target = args.get("target")
-        message = args.get("message", "")
-        tone = args.get("tone", "neutral")
+        target_input = args.get("target")
 
-        # Simple social mechanics - could trigger rolls or effects
+        # Normalize target to list for consistent processing
+        if isinstance(target_input, str):
+            targets = [target_input]
+        elif isinstance(target_input, list):
+            targets = target_input
+        else:
+            targets = []
+
+        # Check for empty targets early to prevent IndexError
+        if not targets:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": "Who are you trying to talk to?",
+                    "reason": "no_target",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Look around first",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing target",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message="No target specified for talk action",
+            )
+
+        intent = args.get("intent", "persuade")
+        style = args.get("style", 1)
+        domain = args.get("domain", "d6")
+        dc_hint = args.get("dc_hint", 12)
+        adv_style_delta = args.get("adv_style_delta", 0)
+        topic = args.get("topic")
+
+        # Validate entities exist
+        if actor not in state.entities:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"Actor '{actor}' not found. Who is trying to talk?",
+                    "reason": "invalid_target",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Look around first",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' not found",
+            )
+
+        # Validate all targets exist
+        missing_targets = [t for t in targets if t not in state.entities]
+        if missing_targets:
+            target_list = ", ".join(missing_targets)
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"Target(s) '{target_list}' not found. Who are you trying to talk to?",
+                    "reason": "invalid_target",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Look around first",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing target(s)",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Target(s) '{target_list}' not found",
+            )
+
+        # Get primary target for DC calculation (first in list)
+        primary_target = targets[0]
+        target_entities = [state.entities[t] for t in targets]
+
+        actor_entity = state.entities[actor]
+        primary_target_entity = target_entities[0]
+
+        # Validate actor is a creature that can talk
+        if actor_entity.type not in ("pc", "npc"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"Only characters can talk to others.",
+                    "reason": "invalid_target",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Look for someone else",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to non-character actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' is not a character",
+            )
+
+        # Type cast for safe access to actor attributes
+        actor_creature = cast(Union[PC, NPC], actor_entity)
+
+        # Validate actor can act (has positive HP)
+        if actor_creature.hp.current <= 0:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"{actor_creature.name} is unconscious and cannot talk.",
+                    "reason": "not_your_turn",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Get more information",
+                            "tool_id": "get_info",
+                            "args_patch": {
+                                "query": "current situation",
+                                "scope": "current_zone",
+                            },
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to unconscious actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' is unconscious",
+            )
+
+        # Validate target is social_receptive (PC/NPC entities are by default)
+        if primary_target_entity.type not in ("pc", "npc"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"You can't have a meaningful conversation with {primary_target_entity.name}.",
+                    "reason": "invalid_target",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Look for someone else to talk to",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to non-social target",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Target '{primary_target}' is not social_receptive",
+            )
+
+        # Type cast for safe access to target attributes
+        target_creature = cast(Union[PC, NPC], primary_target_entity)
+
+        # Validate target is visible (in same zone) - check primary target
+        if primary_target not in actor_creature.visible_actors:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"You can't see {target_creature.name} to talk to them.",
+                    "reason": "not_adjacent",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Look around for targets",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to invisible target",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Target '{primary_target}' is not visible to speaker '{actor}'",
+            )
+
+        # Calculate effective style
+        effective_style = max(0, min(3, style + adv_style_delta))
+
+        # Parse domain die size
+        try:
+            if not domain.startswith("d") or not domain[1:].isdigit():
+                raise ValueError(f"Invalid domain format: {domain}")
+            domain_size = int(domain[1:])  # "d6" -> 6
+        except (ValueError, IndexError):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"I don't understand the dice format '{domain}'. Please use format like 'd6' or 'd8'.",
+                    "reason": "missing_arg",
+                    "options": [
+                        {
+                            "id": "A",
+                            "label": "Try something else",
+                            "tool_id": "narrate_only",
+                            "args_patch": {"topic": "look around"},
+                        }
+                    ],
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to invalid dice format",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Invalid domain format: {domain}",
+            )
+
+        # Roll dice: d20 + sum(effective_style × domain dice)
+        d20_roll = random.randint(1, 20)
+        style_dice = [random.randint(1, domain_size) for _ in range(effective_style)]
+        style_sum = sum(style_dice)
+        total = d20_roll + style_sum
+
+        # Calculate margin and determine outcome
+        margin = total - dc_hint
+        if d20_roll == 20 or margin >= 5:
+            outcome = "crit_success"
+        elif margin >= 0:
+            outcome = "success"
+        elif margin >= -3:
+            outcome = "partial"
+        else:
+            outcome = "fail"
+
+        # Generate effects based on intent and outcome - apply to all targets
         effects = []
-        facts = {"message_delivered": True, "tone": tone}
+        for target_id in targets:
+            target_effects = self._generate_talk_effects(
+                intent, outcome, actor, target_id, state
+            )
+            effects.extend(target_effects)
 
-        # Set talked flag to prevent multiple talks per turn
-        if actor and actor in state.actors:
-            actor_entity = state.actors[actor]
-            if hasattr(actor_entity, "has_talked_this_turn"):
-                # Type cast to ensure we can access the attribute
-                pc_or_npc = cast(Union[PC, NPC], actor_entity)
-                pc_or_npc.has_talked_this_turn = True
+        # Create detailed narration hint
+        actor_name = actor_creature.name
+
+        # Handle multiple targets in narration
+        if len(targets) == 1:
+            target_name = target_creature.name
+            summary = f"{actor_name} tries to {intent} {target_name}"
+        else:
+            target_names = [state.entities[t].name for t in targets]
+            if len(target_names) == 2:
+                target_list = f"{target_names[0]} and {target_names[1]}"
+            else:
+                target_list = ", ".join(target_names[:-1]) + f", and {target_names[-1]}"
+            summary = f"{actor_name} tries to {intent} {target_list}"
+
+        if topic:
+            summary += f" about {topic}"
+
+        # Calculate audience disposition before/after for narration enrichment
+        audience_disposition_before = {}
+        audience_disposition_after = {}
+        effects_summary = []
+
+        for target_id in targets:
+            target_entity = state.entities.get(target_id)
+            if target_entity and target_entity.type in ("pc", "npc"):
+                target_creature = cast(Union[PC, NPC], target_entity)
+
+                # Record disposition before
+                disposition_before = {
+                    "guard": target_creature.guard,
+                    "marks": getattr(target_creature, "marks", {}),
+                    "attitude": "neutral",  # Could be enhanced with more sophisticated calculation
+                }
+                audience_disposition_before[target_id] = disposition_before
+
+                # Calculate disposition after effects (simulate application)
+                simulated_guard = target_creature.guard
+                simulated_marks = getattr(target_creature, "marks", {}).copy()
+
+                # Simulate effect application to predict disposition after
+                target_effects = self._generate_talk_effects(
+                    intent, outcome, actor, target_id, state
+                )
+                for effect in target_effects:
+                    if effect["type"] == "guard":
+                        simulated_guard = effect["value"]
+                        effects_summary.append(
+                            f"{target_entity.name}: guard {target_creature.guard} → {simulated_guard}"
+                        )
+                    elif effect["type"] == "mark":
+                        tag = effect["tag"]
+                        source = effect["source"]
+                        mark_key = f"{source}.{tag}"
+                        simulated_marks[mark_key] = {
+                            "tag": tag,
+                            "source": source,
+                            "value": effect.get("value", 1),
+                        }
+                        effects_summary.append(
+                            f"{target_entity.name}: gained {tag} mark"
+                        )
+                    elif effect["type"] == "clock":
+                        clock_id = effect["id"]
+                        delta = effect["delta"]
+                        effects_summary.append(f"Clock {clock_id}: +{delta}")
+
+                # Record disposition after
+                disposition_after = {
+                    "guard": simulated_guard,
+                    "marks": simulated_marks,
+                    "attitude": (
+                        "positive"
+                        if simulated_guard < target_creature.guard
+                        else (
+                            "negative"
+                            if simulated_guard > target_creature.guard
+                            else "neutral"
+                        )
+                    ),
+                }
+                audience_disposition_after[target_id] = disposition_after
 
         narration_hint = {
-            "summary": f"Spoke to {args.get('target_name', target)}",
-            "social": {
-                "tone": tone,
-                "message": message[:50] + "..." if len(message) > 50 else message,
+            "summary": summary,
+            "dice": {
+                "d20": d20_roll,
+                "style": style_dice,
+                "style_sum": style_sum,
+                "total": total,
+                "dc": dc_hint,
+                "margin": margin,
+                "effective_style": effective_style,
             },
-            "tone_tags": ["social", tone],
-            "salient_entities": [actor, target],
+            "outcome": outcome,
+            "tone_tags": ["social", intent]
+            + (["critical"] if outcome == "crit_success" else []),
+            "mentioned_entities": [actor] + targets,
+            "intent": intent,
+            "topic": topic,
+            "sentences_max": 3,
+            # Enhanced narration context
+            "audience_disposition_before": audience_disposition_before,
+            "audience_disposition_after": audience_disposition_after,
+            "effects_summary": effects_summary,
         }
 
         return ToolResult(
             ok=True,
             tool_id="talk",
             args=args,
-            facts=facts,
+            facts={
+                "outcome": outcome,
+                "margin": margin,
+                "total": total,
+                "dc": dc_hint,
+                "intent": intent,
+                "topic": topic,
+            },
             effects=effects,
             narration_hint=narration_hint,
         )
+
+    def _generate_talk_effects(
+        self, intent: str, outcome: str, actor: str, target: str, state: GameState
+    ) -> List[Dict[str, Any]]:
+        """Generate effects based on talk intent and outcome using data-driven approach."""
+        effects = []
+
+        # Get target entity to check current guard value
+        target_entity = state.entities.get(target)
+        current_guard = 0
+        if target_entity and target_entity.type in ("pc", "npc"):
+            target_creature = cast(Union[PC, NPC], target_entity)
+            current_guard = target_creature.guard
+
+        # Look up intent and outcome in social outcomes configuration
+        intent_config = self.social_outcomes.get("intents", {}).get(intent)
+        if not intent_config:
+            logger.warning(f"Unknown intent '{intent}', using fallback")
+            return []
+
+        outcome_config = intent_config.get("outcomes", {}).get(outcome)
+        if not outcome_config:
+            logger.warning(
+                f"Unknown outcome '{outcome}' for intent '{intent}', using fallback"
+            )
+            return []
+
+        # Process each effect template from configuration
+        for effect_template in outcome_config.get("effects", []):
+            effect = effect_template.copy()
+
+            # Add standard fields
+            effect["target"] = target
+            effect["source"] = actor
+            effect["cause"] = intent
+
+            # Handle special effect type processing
+            if effect["type"] == "guard":
+                # Calculate new guard value with deltas
+                delta = effect.get("delta", 0)
+                min_value = effect.get("min_value", 0)
+                new_guard = max(min_value, current_guard + delta)
+                effect["value"] = new_guard
+
+            elif effect["type"] == "clock":
+                # Build full clock ID from suffix
+                if "id_suffix" in effect:
+                    effect["id"] = f"{target}.{effect['id_suffix']}"
+                    del effect["id_suffix"]
+
+            elif effect["type"] == "mark":
+                # Mark effects are already properly structured
+                pass
+
+            effects.append(effect)
+
+        return effects
 
     def _execute_attack(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
