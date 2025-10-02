@@ -580,33 +580,49 @@ def test_fallback_outcomes_all_social_intents(demo_state):
 
         # Verify all expected social intents are present
         expected_intents = [
-            "persuade", "intimidate", "deceive", "charm", 
-            "comfort", "request", "distract"
+            "persuade",
+            "intimidate",
+            "deceive",
+            "charm",
+            "comfort",
+            "request",
+            "distract",
         ]
-        
+
         assert "intents" in fallback
         for intent in expected_intents:
-            assert intent in fallback["intents"], f"Missing fallback for intent: {intent}"
-            
+            assert (
+                intent in fallback["intents"]
+            ), f"Missing fallback for intent: {intent}"
+
             # Verify each intent has proper outcome structure
             intent_data = fallback["intents"][intent]
             assert "outcomes" in intent_data
-            
+
             expected_outcomes = ["crit_success", "success", "partial", "fail"]
             for outcome in expected_outcomes:
-                assert outcome in intent_data["outcomes"], f"Missing {outcome} for {intent}"
+                assert (
+                    outcome in intent_data["outcomes"]
+                ), f"Missing {outcome} for {intent}"
                 assert "effects" in intent_data["outcomes"][outcome]
 
 
 def test_fallback_outcomes_work_when_json_fails(demo_state):
     """Test that talk works with fallback outcomes when social_outcomes.json fails to load."""
     from unittest.mock import patch
-    
+
     # Mock file loading to force fallback outcomes
     with patch("builtins.open", side_effect=FileNotFoundError("Mocked file not found")):
         # Test each social intent with fallback outcomes
-        intents_to_test = ["intimidate", "deceive", "charm", "comfort", "request", "distract"]
-        
+        intents_to_test = [
+            "intimidate",
+            "deceive",
+            "charm",
+            "comfort",
+            "request",
+            "distract",
+        ]
+
         for intent in intents_to_test:
             args = {
                 "actor": "pc.arin",
@@ -616,35 +632,42 @@ def test_fallback_outcomes_work_when_json_fails(demo_state):
                 "domain": "d6",
                 "dc_hint": 12,
             }
-            
+
             utterance = Utterance(text=f"I {intent} the guard", actor_id="pc.arin")
             result = validate_and_execute("talk", args, demo_state, utterance, seed=42)
-            
+
             # Should succeed even with fallback outcomes
-            assert result.ok is True, f"Talk with {intent} should work with fallback outcomes"
+            assert (
+                result.ok is True
+            ), f"Talk with {intent} should work with fallback outcomes"
             assert result.facts["intent"] == intent
-            assert result.facts["outcome"] in ["crit_success", "success", "partial", "fail"]
-            
+            assert result.facts["outcome"] in [
+                "crit_success",
+                "success",
+                "partial",
+                "fail",
+            ]
+
 
 def test_empty_targets_list_prevents_indexerror(demo_state):
     """Test that empty targets list is handled gracefully without IndexError."""
     from router.validator import Validator
-    
+
     validator = Validator()
-    
+
     # Test with None target by calling _execute_talk directly to bypass schema validation
     args = {
-        "actor": "pc.arin", 
+        "actor": "pc.arin",
         "target": None,
         "intent": "persuade",
         "style": 2,
         "domain": "d6",
         "dc_hint": 12,
     }
-    
+
     utterance = Utterance(text="I persuade nobody", actor_id="pc.arin")
     result = validator._execute_talk(args, demo_state, utterance, seed=42)
-    
+
     assert result.ok is False, "Should fail gracefully with no target"
     assert result.tool_id == "ask_clarifying"
     assert "Who are you trying to talk to?" in result.args["question"]
@@ -654,22 +677,22 @@ def test_empty_targets_list_prevents_indexerror(demo_state):
 def test_empty_target_list_prevents_indexerror(demo_state):
     """Test that empty target list is handled gracefully without IndexError."""
     from router.validator import Validator
-    
+
     validator = Validator()
-    
+
     # Test with empty list target by calling _execute_talk directly to bypass schema validation
     args = {
         "actor": "pc.arin",
         "target": [],
-        "intent": "persuade", 
+        "intent": "persuade",
         "style": 2,
         "domain": "d6",
         "dc_hint": 12,
     }
-    
+
     utterance = Utterance(text="I persuade nobody", actor_id="pc.arin")
     result = validator._execute_talk(args, demo_state, utterance, seed=42)
-    
+
     assert result.ok is False, "Should fail gracefully with empty target list"
     assert result.tool_id == "ask_clarifying"
     assert "Who are you trying to talk to?" in result.args["question"]

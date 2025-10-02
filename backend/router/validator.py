@@ -129,7 +129,9 @@ class Validator:
                 "deceive": {
                     "outcomes": {
                         "crit_success": {
-                            "effects": [{"type": "mark", "tag": "deception", "value": 1}]
+                            "effects": [
+                                {"type": "mark", "tag": "deception", "value": 1}
+                            ]
                         },
                         "success": {
                             "effects": [
@@ -141,9 +143,7 @@ class Validator:
                                 }
                             ]
                         },
-                        "partial": {
-                            "effects": [{"type": "guard", "delta": 1}]
-                        },
+                        "partial": {"effects": [{"type": "guard", "delta": 1}]},
                         "fail": {"effects": [{"type": "guard", "delta": 1}]},
                     }
                 },
@@ -213,7 +213,9 @@ class Validator:
                 "distract": {
                     "outcomes": {
                         "crit_success": {
-                            "effects": [{"type": "mark", "tag": "distraction", "value": 1}]
+                            "effects": [
+                                {"type": "mark", "tag": "distraction", "value": 1}
+                            ]
                         },
                         "success": {
                             "effects": [{"type": "guard", "delta": -1, "min_value": 0}]

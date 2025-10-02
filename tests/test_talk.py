@@ -155,7 +155,7 @@ class TestTalkOutcomes:
 
         # Test different seeds to get different outcomes
         test_seeds = [1, 42, 100]
-        
+
         for seed in test_seeds:
             utterance = Utterance(text="I try to persuade", actor_id="pc.arin")
             result = validate_and_execute(
@@ -185,29 +185,36 @@ class TestTalkOutcomes:
 
         # Test multiple seeds to ensure we get different outcomes
         test_seeds = [1, 42, 100, 200, 500]
-        
+
         for seed in test_seeds:
             utterance = Utterance(text="I intimidate the guard", actor_id="pc.arin")
-            result = validate_and_execute("talk", base_args, talk_state, utterance, seed=seed)
+            result = validate_and_execute(
+                "talk", base_args, talk_state, utterance, seed=seed
+            )
 
             assert result.ok == True
             assert result.facts["intent"] == "intimidate"
-            
+
             # Validate effects based on actual outcome
             outcome = result.facts["outcome"]
-            
+
             if outcome == "crit_success":
                 # Should have fear mark effect
                 fear_effects = [
-                    e for e in result.effects
+                    e
+                    for e in result.effects
                     if e.get("type") == "mark" and e.get("tag") == "fear"
                 ]
-                assert len(fear_effects) >= 1, f"Expected fear mark for crit_success with seed {seed}"
-                
+                assert (
+                    len(fear_effects) >= 1
+                ), f"Expected fear mark for crit_success with seed {seed}"
+
             elif outcome in ["success", "partial"]:
                 # Should have some effects for successful outcomes
-                assert len(result.effects) > 0, f"Expected effects for {outcome} with seed {seed}"
-                
+                assert (
+                    len(result.effects) > 0
+                ), f"Expected effects for {outcome} with seed {seed}"
+
             # All outcomes should be valid
             assert outcome in ["crit_success", "success", "partial", "fail"]
 
@@ -232,10 +239,12 @@ class TestTalkEffects:
         assert result.ok == True
         # Effects should be generated based on outcome - some outcomes may have no effects
         assert len(result.effects) >= 0  # This verifies effects list exists
-        
+
         # For successful social interactions, expect at least one effect
         if result.facts["outcome"] in ["crit_success", "success", "partial"]:
-            assert len(result.effects) > 0, f"Expected effects for outcome: {result.facts['outcome']}"
+            assert (
+                len(result.effects) > 0
+            ), f"Expected effects for outcome: {result.facts['outcome']}"
 
         # Check effect structure
         for effect in result.effects:
