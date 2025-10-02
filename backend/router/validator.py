@@ -1257,62 +1257,64 @@ class Validator:
                 error_message=f"Actor '{actor}' is unconscious",
             )
 
-        # Validate target is social_receptive (PC/NPC entities are by default)
-        if primary_target_entity.type not in ("pc", "npc"):
-            return ToolResult(
-                ok=False,
-                tool_id="ask_clarifying",
-                args={
-                    "question": f"You can't have a meaningful conversation with {primary_target_entity.name}.",
-                    "reason": "invalid_target",
-                    "options": [
-                        {
-                            "id": "A",
-                            "label": "Look for someone else to talk to",
-                            "tool_id": "narrate_only",
-                            "args_patch": {"topic": "look around"},
-                        }
-                    ],
-                },
-                facts={},
-                effects=[],
-                narration_hint={
-                    "summary": "Asked for clarification due to non-social target",
-                    "tone_tags": ["helpful"],
-                    "salient_entities": [],
-                },
-                error_message=f"Target '{primary_target}' is not social_receptive",
-            )
+        # Validate ALL targets are social creatures and visible to actor
+        for i, (target_id, target_entity) in enumerate(zip(targets, target_entities)):
+            # Check if target is a social creature (pc or npc)
+            if target_entity.type not in ("pc", "npc"):
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": f"You can't have a meaningful conversation with {target_entity.name}.",
+                        "reason": "invalid_target",
+                        "options": [
+                            {
+                                "id": "A",
+                                "label": "Look for someone else to talk to",
+                                "tool_id": "narrate_only",
+                                "args_patch": {"topic": "look around"},
+                            }
+                        ],
+                    },
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": "Asked for clarification due to non-social target",
+                        "tone_tags": ["helpful"],
+                        "salient_entities": [],
+                    },
+                    error_message=f"Target '{target_id}' is not social_receptive",
+                )
+
+            # Check if target is visible to actor
+            if target_id not in actor_creature.visible_actors:
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": f"You can't see {target_entity.name} to talk to them.",
+                        "reason": "not_adjacent",
+                        "options": [
+                            {
+                                "id": "A",
+                                "label": "Look around for targets",
+                                "tool_id": "narrate_only",
+                                "args_patch": {"topic": "look around"},
+                            }
+                        ],
+                    },
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": "Asked for clarification due to invisible target",
+                        "tone_tags": ["helpful"],
+                        "salient_entities": [],
+                    },
+                    error_message=f"Target '{target_id}' is not visible to speaker '{actor}'",
+                )
 
         # Type cast for safe access to target attributes
         target_creature = cast(Union[PC, NPC], primary_target_entity)
-
-        # Validate target is visible (in same zone) - check primary target
-        if primary_target not in actor_creature.visible_actors:
-            return ToolResult(
-                ok=False,
-                tool_id="ask_clarifying",
-                args={
-                    "question": f"You can't see {target_creature.name} to talk to them.",
-                    "reason": "not_adjacent",
-                    "options": [
-                        {
-                            "id": "A",
-                            "label": "Look around for targets",
-                            "tool_id": "narrate_only",
-                            "args_patch": {"topic": "look around"},
-                        }
-                    ],
-                },
-                facts={},
-                effects=[],
-                narration_hint={
-                    "summary": "Asked for clarification due to invisible target",
-                    "tone_tags": ["helpful"],
-                    "salient_entities": [],
-                },
-                error_message=f"Target '{primary_target}' is not visible to speaker '{actor}'",
-            )
 
         # Calculate effective style
         effective_style = max(0, min(3, style + adv_style_delta))

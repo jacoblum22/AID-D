@@ -610,9 +610,14 @@ def test_fallback_outcomes_all_social_intents(demo_state):
 def test_fallback_outcomes_work_when_json_fails(demo_state):
     """Test that talk works with fallback outcomes when social_outcomes.json fails to load."""
     from unittest.mock import patch
+    from router.validator import Validator
 
     # Mock file loading to force fallback outcomes
     with patch("builtins.open", side_effect=FileNotFoundError("Mocked file not found")):
+        # Create a fresh Validator instance inside the patched block
+        # so it actually uses the fallback path
+        test_validator = Validator()
+
         # Test each social intent with fallback outcomes
         intents_to_test = [
             "intimidate",
@@ -634,7 +639,9 @@ def test_fallback_outcomes_work_when_json_fails(demo_state):
             }
 
             utterance = Utterance(text=f"I {intent} the guard", actor_id="pc.arin")
-            result = validate_and_execute("talk", args, demo_state, utterance, seed=42)
+            result = test_validator.validate_and_execute(
+                "talk", args, demo_state, utterance, seed=42
+            )
 
             # Should succeed even with fallback outcomes
             assert (
