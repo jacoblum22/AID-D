@@ -69,6 +69,17 @@ def create_demo_state() -> GameState:
 
 def test_planner_integration():
     """Test the full planner integration with LLM."""
+    successful_tests, failed_tests = run_planner_integration_tests()
+
+    # Make assertions for pytest
+    assert (
+        successful_tests > 0
+    ), f"Should have some successful tests, got {successful_tests}"
+    assert failed_tests == 0, f"Should have no failed tests, got {failed_tests}"
+
+
+def run_planner_integration_tests():
+    """Utility function to run planner integration tests - returns counts for external use."""
 
     print("=== AI D&D Planner System Demo (Step 3) ===\n")
 
@@ -263,7 +274,7 @@ def test_failure_scenarios():
 
 if __name__ == "__main__":
     try:
-        success_count, fail_count = test_planner_integration()
+        success_count, fail_count = run_planner_integration_tests()
         test_prompt_realism()
         test_failure_scenarios()
 

@@ -14,11 +14,23 @@ import uuid
 import random
 import logging
 import os
+import hashlib
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Union, cast
 from pydantic import BaseModel, ValidationError
 from dataclasses import dataclass
 
-from .game_state import GameState, Utterance, PC, NPC
+from .game_state import (
+    GameState,
+    Utterance,
+    PC,
+    NPC,
+    ObjectEntity,
+    ItemEntity,
+    is_visible_to,
+    is_zone_visible_to,
+    is_clock_visible_to,
+)
 from .tool_catalog import TOOL_CATALOG, get_tool_by_id
 from .effects import apply_effects
 
@@ -499,7 +511,7 @@ class Validator:
             try:
                 validated_args = tool.args_schema(**raw_args)
                 schema_ok = True
-                sanitized_args = validated_args.dict()
+                sanitized_args = validated_args.model_dump()
             except ValidationError as e:
                 return self._create_error_result(
                     tool_id, raw_args, f"Schema validation failed: {e}", log_entry
@@ -3223,47 +3235,974 @@ class Validator:
     def _execute_get_info(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute get_info tool."""
-        query = args.get("query", "")
-        scope = args.get("scope", "current_zone")
+        """Execute get_info tool - retrieve structured facts from game state."""
 
-        # Generate info based on scope
-        info = {}
-        if scope == "current_zone" and state.current_actor:
-            current_actor = state.actors.get(state.current_actor)
-            if current_actor and hasattr(current_actor, "visible_actors"):
-                pc_or_npc = cast(Union[PC, NPC], current_actor)
-                current_zone = state.zones.get(current_actor.current_zone)
-                if current_zone:
-                    info = {
-                        "zone_name": current_zone.name,
-                        "zone_description": current_zone.description,
-                        "visible_actors": [
-                            state.actors[aid].name
-                            for aid in pc_or_npc.visible_actors
-                            if aid in state.actors
-                        ],
-                        "adjacent_zones": [
-                            state.zones[zid].name
-                            for zid in current_zone.adjacent_zones
-                            if zid in state.zones
-                        ],
-                    }
+        # Extract arguments with defaults
+        actor = args.get("actor", state.current_actor)
+        target = (
+            args.get("target") or actor
+        )  # Default to actor if target is None or missing
+        topic = args.get("topic", "status")
+        detail_level = args.get("detail_level", "brief")
+
+        # Validate context - must have at least one valid context
+        if not actor and not target:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": "Who or what would you like to get information about?",
+                    "reason": "missing_arg",
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification - no valid context provided",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message="No valid actor or target provided",
+            )
+
+        # Validate target exists if specified
+        if target and target not in state.entities and target not in state.zones:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"I don't see '{target}' here. What would you like to check instead?",
+                    "reason": "invalid_target",
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": f"Asked for clarification - '{target}' not found",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [actor] if actor else [],
+                },
+                error_message=f"Target '{target}' not found in game state",
+            )
+
+        # Validate target visibility if it's an entity
+        if target and target in state.entities:
+            entity = state.entities[target]
+            if not is_visible_to(entity, state.scene):
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": f"I don't see '{target}' here. What would you like to check instead?",
+                        "reason": "invalid_target",
+                    },
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": f"Asked for clarification - '{target}' not visible",
+                        "tone_tags": ["helpful"],
+                        "salient_entities": [actor] if actor else [],
+                    },
+                    error_message=f"Target '{target}' not visible to actor",
+                )
+
+        # Generate facts based on topic
+        facts = {}
+        narration_summary = ""
+
+        try:
+            # Extract parameters
+            limit = args.get("limit")
+            offset = args.get("offset", 0)
+            fields = args.get("fields")
+            use_refs = args.get("use_refs", False)
+
+            # Generate query metadata
+            query_metadata = self._generate_query_metadata(state)
+
+            if topic == "status":
+                facts, narration_summary = self._get_status_info(
+                    target, state, detail_level, fields
+                )
+            elif topic == "inventory":
+                facts, narration_summary = self._get_inventory_info(
+                    target, state, detail_level, limit, offset, fields
+                )
+            elif topic == "zone":
+                facts, narration_summary = self._get_zone_info(
+                    target, state, detail_level, limit, offset, fields
+                )
+            elif topic == "scene":
+                facts, narration_summary = self._get_scene_info(
+                    state, detail_level, fields
+                )
+            elif topic == "effects":
+                facts, narration_summary = self._get_effects_info(
+                    target, state, detail_level, fields
+                )
+            elif topic == "clocks":
+                facts, narration_summary = self._get_clocks_info(
+                    state, detail_level, limit, offset, fields
+                )
+            elif topic == "relationships":
+                facts, narration_summary = self._get_relationships_info(
+                    target, state, detail_level, limit, offset, fields
+                )
+            elif topic == "rules":
+                facts, narration_summary = self._get_rules_info(
+                    state, detail_level, fields
+                )
+            else:
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": f"I don't know how to get information about '{topic}'. What would you like to know instead?",
+                        "reason": "unknown_topic",
+                    },
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": f"Asked for clarification - unknown topic '{topic}'",
+                        "tone_tags": ["helpful"],
+                        "salient_entities": [actor] if actor else [],
+                    },
+                    error_message=f"Unknown topic: {topic}",
+                )
+
+            # Add query metadata to facts
+            facts["_metadata"] = query_metadata
+
+            # Transform to refs structure if requested
+            if use_refs:
+                refs = self._build_refs_structure(facts, state)
+                thin_facts = self._convert_facts_to_thin_format(facts)
+                facts = {"facts": thin_facts, "refs": refs}
+
+        except Exception as e:
+            return ToolResult(
+                ok=False,
+                tool_id="get_info",
+                args=args,
+                facts={},
+                effects=[],
+                narration_hint={},
+                error_message=f"Error gathering {topic} information: {str(e)}",
+            )
 
         return ToolResult(
             ok=True,
             tool_id="get_info",
             args=args,
-            facts=info,
-            effects=[],
+            facts=facts,
+            effects=[],  # Read-only tool, no effects
             narration_hint={
-                "summary": "Gathered information",
-                "tone_tags": ["observant"],
-                "salient_entities": (
-                    [state.current_actor] if state.current_actor else []
-                ),
+                "summary": narration_summary,
+                "tone_tags": ["informative", "status"],
+                "sentences_max": 2 if detail_level == "brief" else 4,
+                "salient_entities": [target] if target else [],
             },
         )
+
+    # Helper methods for size control
+    def _filter_fields(
+        self, data: Dict[str, Any], fields: Optional[List[str]]
+    ) -> Dict[str, Any]:
+        """Filter dictionary to only include specified fields (preserves _metadata)."""
+        if fields is None:
+            return data
+
+        # Always preserve metadata
+        filtered = {key: value for key, value in data.items() if key in fields}
+        if "_metadata" in data:
+            filtered["_metadata"] = data["_metadata"]
+        return filtered
+
+    def _apply_pagination(
+        self, items: List[Any], limit: Optional[int], offset: int
+    ) -> tuple[List[Any], Dict[str, Any]]:
+        """Apply pagination to a list and return pagination metadata."""
+        total_count = len(items)
+
+        # Apply offset
+        if offset >= total_count:
+            paginated_items = []
+        else:
+            paginated_items = items[offset:]
+
+        # Apply limit
+        if limit is not None and limit > 0:
+            paginated_items = paginated_items[:limit]
+
+        # Create pagination metadata
+        pagination = {
+            "total_count": total_count,
+            "offset": offset,
+            "limit": limit,
+            "returned_count": len(paginated_items),
+            "has_more": offset + len(paginated_items) < total_count,
+        }
+
+        return paginated_items, pagination
+
+    def _generate_query_metadata(self, state: GameState) -> Dict[str, Any]:
+        """Generate query metadata for audit and replay support."""
+        # Generate a deterministic snapshot ID based on key state elements
+        state_fingerprint = f"r{state.scene.round}_t{state.scene.turn_index}_{len(state.entities)}_{len(state.clocks)}"
+        # Use deterministic hash function for consistent snapshot IDs across sessions
+        snapshot_hash = hashlib.md5(state_fingerprint.encode("utf-8")).hexdigest()
+        snapshot_id = f"snap_{snapshot_hash[:8]}"
+
+        return {
+            "schema_version": "1.0.0",
+            "query_id": str(uuid.uuid4()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "round": state.scene.round,
+            "turn_id": f"r{state.scene.round}_t{state.scene.turn_index}",
+            "turn_index": state.scene.turn_index,
+            "snapshot_id": snapshot_id,
+            "current_actor": state.current_actor,
+            "scene_id": state.scene.id,
+            "game_state_summary": {
+                "entity_count": len(state.entities),
+                "clock_count": len(state.clocks),
+                "pending_action": state.pending_action,
+            },
+        }
+
+    def _build_refs_structure(
+        self, facts: Dict[str, Any], state: GameState
+    ) -> Dict[str, Any]:
+        """Transform facts into refs structure, extracting entity/zone/clock details into refs."""
+        refs = {"entities": {}, "zones": {}, "clocks": {}, "relationships": {}}
+
+        # Find and extract entity references
+        entity_ids = set()
+
+        # Collect entity IDs from various fact patterns
+        if "entity_id" in facts:
+            entity_ids.add(facts["entity_id"])
+        if "entities" in facts and isinstance(facts["entities"], list):
+            entity_ids.update(facts["entities"])
+        if "entity_details" in facts and isinstance(facts["entity_details"], dict):
+            entity_ids.update(facts["entity_details"].keys())
+
+        # Build entity refs
+        for entity_id in entity_ids:
+            if entity_id in state.entities:
+                entity = state.entities[entity_id]
+                refs["entities"][entity_id] = {
+                    "id": entity.id,
+                    "name": entity.name,
+                    "type": entity.type,
+                    "current_zone": entity.current_zone,
+                }
+
+                # Add type-specific fields
+                if entity.type in ("pc", "npc"):
+                    living_entity = cast(Union[PC, NPC], entity)
+                    refs["entities"][entity_id].update(
+                        {
+                            "hp": living_entity.hp.current,
+                            "max_hp": living_entity.hp.max,
+                            "marks": list(getattr(living_entity, "marks", {}).keys()),
+                            "inventory": getattr(living_entity, "inventory", []),
+                        }
+                    )
+                elif entity.type == "object":
+                    object_entity = cast(ObjectEntity, entity)
+                    refs["entities"][entity_id][
+                        "interactable"
+                    ] = object_entity.interactable
+
+        # Find and extract zone references
+        zone_ids = set()
+        if "zone_id" in facts:
+            zone_ids.add(facts["zone_id"])
+        if "adjacent_zones" in facts and isinstance(facts["adjacent_zones"], list):
+            zone_ids.update(facts["adjacent_zones"])
+
+        # Add current zone of referenced entities
+        for entity_id in entity_ids:
+            if entity_id in state.entities:
+                zone_ids.add(state.entities[entity_id].current_zone)
+
+        # Build zone refs
+        for zone_id in zone_ids:
+            if zone_id in state.zones:
+                zone = state.zones[zone_id]
+                refs["zones"][zone_id] = {
+                    "id": zone.id,
+                    "name": zone.name,
+                    "description": zone.description,
+                    "adjacent_zones": zone.adjacent_zones,
+                }
+
+        # Find and extract clock references
+        clock_ids = set()
+        if "active_clocks" in facts and isinstance(facts["active_clocks"], dict):
+            for clock_id in facts["active_clocks"].keys():
+                if not clock_id.startswith("[hidden"):  # Skip hidden placeholders
+                    clock_ids.add(clock_id)
+
+        # Build clock refs
+        for clock_id in clock_ids:
+            if clock_id in state.clocks:
+                clock_data = state.clocks[clock_id]
+                refs["clocks"][clock_id] = {
+                    "id": clock_id,
+                    "value": clock_data["value"],
+                    "max": clock_data.get("max", 10),
+                    "min": clock_data.get("min", 0),
+                    "source": clock_data.get("source", "unknown"),
+                }
+
+        # Find and extract relationship references
+        if "relationships" in facts and isinstance(facts["relationships"], dict):
+            refs["relationships"] = facts["relationships"].copy()
+
+        # Remove empty refs sections
+        refs = {k: v for k, v in refs.items() if v}
+
+        return refs
+
+    def _convert_facts_to_thin_format(self, facts: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert detailed facts to thin ID-based format for refs structure."""
+        thin_facts = facts.copy()
+
+        # Convert entity_details to entity_ids
+        if "entity_details" in thin_facts:
+            thin_facts["entity_ids"] = list(thin_facts["entity_details"].keys())
+            del thin_facts["entity_details"]
+
+        # Convert active_clocks to clock_ids (excluding hidden placeholders)
+        if "active_clocks" in thin_facts:
+            clock_ids = [
+                cid
+                for cid in thin_facts["active_clocks"].keys()
+                if not cid.startswith("[hidden")
+            ]
+            if clock_ids:
+                thin_facts["clock_ids"] = clock_ids
+            del thin_facts["active_clocks"]
+
+        # Convert item_details to item_ids
+        if "item_details" in thin_facts:
+            thin_facts["item_ids"] = list(thin_facts["item_details"].keys())
+            del thin_facts["item_details"]
+
+        # Convert relationship details to source_ids
+        if "relationships" in thin_facts and isinstance(
+            thin_facts["relationships"], dict
+        ):
+            source_ids = list(thin_facts["relationships"].keys())
+            if source_ids:
+                thin_facts["relationship_source_ids"] = source_ids
+            del thin_facts["relationships"]
+
+        return thin_facts
+
+    def _get_status_info(
+        self,
+        target: str,
+        state: GameState,
+        detail_level: str,
+        fields: Optional[List[str]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """Get status information about an entity with perception filtering."""
+        if target not in state.entities:
+            raise ValueError(f"Entity {target} not found")
+
+        entity = state.entities[target]
+        # Note: Visibility is checked at the main execution level
+
+        facts: Dict[str, Any] = {
+            "topic": "status",
+            "entity_id": target,
+            "entity_type": entity.type,
+            "id": entity.id,  # Include ID for consistency
+            "name": entity.name,
+            "position": entity.current_zone,
+        }
+
+        # Add HP for living entities
+        if entity.type in ("pc", "npc"):
+            living_entity = cast(Union[PC, NPC], entity)
+            facts["hp"] = living_entity.hp.current
+            facts["max_hp"] = living_entity.hp.max
+            facts["guard"] = getattr(living_entity, "guard", 0)
+
+            # Add marks in new format (sorted)
+            marks = getattr(living_entity, "marks", {})
+            if marks:
+                facts["marks"] = sorted(marks.keys())
+            else:
+                facts["marks"] = []
+
+            # Add tags if any (sorted)
+            if entity.tags:
+                facts["tags"] = sorted(entity.tags.keys())
+            else:
+                facts["tags"] = []
+
+            if detail_level == "full":
+                facts["stats"] = {
+                    "strength": living_entity.stats.strength,
+                    "dexterity": living_entity.stats.dexterity,
+                    "constitution": living_entity.stats.constitution,
+                    "intelligence": living_entity.stats.intelligence,
+                    "wisdom": living_entity.stats.wisdom,
+                    "charisma": living_entity.stats.charisma,
+                }
+                facts["conditions"] = getattr(living_entity, "conditions", {})
+
+        elif entity.type == "object":
+            obj_entity = cast(ObjectEntity, entity)
+            facts["interactable"] = obj_entity.interactable
+            facts["locked"] = getattr(obj_entity, "locked", False)
+            if detail_level == "full":
+                facts["description"] = getattr(obj_entity, "description", "")
+
+        elif entity.type == "item":
+            item_entity = cast(ItemEntity, entity)
+            facts["weight"] = item_entity.weight
+            facts["value"] = item_entity.value
+            if detail_level == "full":
+                facts["description"] = getattr(item_entity, "description", "")
+
+        # Generate summary
+        if entity.type in ("pc", "npc"):
+            living_entity = cast(Union[PC, NPC], entity)
+            summary = f"{entity.name} is at {facts['hp']}/{facts['max_hp']} HP in {entity.current_zone}"
+            if facts["tags"]:
+                summary += f" with tags: {', '.join(facts['tags'])}"
+        else:
+            summary = f"{entity.name} is a {entity.type} in {entity.current_zone}"
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_inventory_info(
+        self,
+        target: str,
+        state: GameState,
+        detail_level: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        fields: Optional[List[str]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """Get inventory information with deterministic ordering."""
+        if target not in state.entities:
+            raise ValueError(f"Entity {target} not found")
+
+        entity = state.entities[target]
+
+        if entity.type not in ("pc", "npc"):
+            raise ValueError(f"Entity {target} does not have inventory")
+
+        living_entity = cast(Union[PC, NPC], entity)
+        inventory = getattr(living_entity, "inventory", [])
+
+        # Sort inventory for deterministic ordering
+        sorted_inventory = sorted(inventory)
+
+        # Apply pagination
+        paginated_inventory, pagination = self._apply_pagination(
+            sorted_inventory, limit, offset
+        )
+
+        facts: Dict[str, Any] = {
+            "topic": "inventory",
+            "entity_id": target,
+            "items": paginated_inventory,
+            "item_count": len(paginated_inventory),
+        }
+
+        # Add pagination metadata if pagination was applied
+        if limit is not None or offset > 0:
+            facts["pagination"] = pagination
+
+        if detail_level == "full" and paginated_inventory:
+            # Try to get item details from the item registry with ID+name format
+            item_details = {}
+            unique_items = sorted(
+                set(paginated_inventory)
+            )  # Sort unique items from paginated list
+            for item_id in unique_items:
+                count = paginated_inventory.count(item_id)
+                item_info = self.item_registry.get(item_id, {})
+                item_details[item_id] = {
+                    "id": item_id,  # Include ID for consistency
+                    "count": count,
+                    "name": item_info.get("name", item_id),
+                    "description": item_info.get("description", ""),
+                }
+            facts["item_details"] = item_details
+
+        if paginated_inventory:
+            unique_items = sorted(set(paginated_inventory))
+            if limit is not None and pagination["has_more"]:
+                summary = f"{entity.name} carries {pagination['total_count']} total items (showing {len(paginated_inventory)}): {', '.join(unique_items)}"
+            else:
+                summary = f"{entity.name} carries {len(paginated_inventory)} items: {', '.join(unique_items)}"
+        else:
+            if limit is not None and pagination["total_count"] > 0:
+                summary = f"{entity.name} carries {pagination['total_count']} items (none in this page)"
+            else:
+                summary = f"{entity.name} carries no items"
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_zone_info(
+        self,
+        target: str,
+        state: GameState,
+        detail_level: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        fields: Optional[List[str]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """Get zone information with perception filtering."""
+        # If target is an entity, get their zone; if target is a zone ID, use that
+        if target in state.zones:
+            zone_id = target
+        elif target in state.entities:
+            zone_id = state.entities[target].current_zone
+        else:
+            raise ValueError(f"Cannot determine zone for target {target}")
+
+        if zone_id not in state.zones:
+            raise ValueError(f"Zone {zone_id} not found")
+
+        zone = state.zones[zone_id]
+
+        # Check if zone itself is visible
+        if not is_zone_visible_to(zone, state.scene):
+            # Return redacted info instead of failing
+            facts: Dict[str, Any] = {
+                "topic": "zone",
+                "zone_id": zone_id,
+                "name": "[hidden]",
+                "entities": [],
+                "entity_count": 0,
+                "adjacent_zones": [],
+                "blocked_exits": [],
+            }
+            return facts, f"Zone information is hidden"
+
+        # Get entities in this zone with visibility filtering
+        all_entities_in_zone = [
+            entity_id
+            for entity_id, entity in state.entities.items()
+            if entity.current_zone == zone_id
+        ]
+
+        # Filter visible entities and sort deterministically
+        visible_entities = [
+            entity_id
+            for entity_id in all_entities_in_zone
+            if is_visible_to(state.entities[entity_id], state.scene)
+        ]
+
+        # Sort entities by (type, name, id) for consistency
+        def entity_sort_key(entity_id: str):
+            entity = state.entities[entity_id]
+            return (entity.type, entity.name.lower(), entity.id)
+
+        visible_entities.sort(key=entity_sort_key)
+
+        # Apply pagination to entities
+        paginated_entities, pagination = self._apply_pagination(
+            visible_entities, limit, offset
+        )
+
+        facts: Dict[str, Any] = {
+            "topic": "zone",
+            "zone_id": zone_id,
+            "name": zone.name,
+            "entities": paginated_entities,
+            "entity_count": len(paginated_entities),
+            "adjacent_zones": sorted(zone.adjacent_zones),  # Sort for consistency
+            "blocked_exits": sorted(
+                getattr(zone, "blocked_exits", [])
+            ),  # Sort for consistency
+        }
+
+        # Add pagination metadata if pagination was applied
+        if limit is not None or offset > 0:
+            facts["pagination"] = pagination
+
+        if detail_level == "full":
+            facts["description"] = zone.description
+            # Add entity details for visible entities only, with ID+name format
+            entity_details = {}
+            for entity_id in paginated_entities:  # Use paginated list
+                entity = state.entities[entity_id]
+                entity_details[entity_id] = {
+                    "id": entity.id,
+                    "name": entity.name,
+                    "type": entity.type,
+                }
+            facts["entity_details"] = entity_details
+
+        if paginated_entities:
+            entity_names = [state.entities[eid].name for eid in paginated_entities]
+            if limit is not None and pagination["has_more"]:
+                hidden_count = len(all_entities_in_zone) - len(visible_entities)
+                summary = f"{zone.name} contains {pagination['total_count']} visible entities (showing {len(paginated_entities)}): {', '.join(entity_names)}"
+                if hidden_count > 0:
+                    summary += f" (+{hidden_count} hidden)"
+            else:
+                hidden_count = len(all_entities_in_zone) - len(visible_entities)
+                summary = f"{zone.name} contains {len(paginated_entities)} visible entities: {', '.join(entity_names)}"
+                if hidden_count > 0:
+                    summary += f" (+{hidden_count} hidden)"
+        else:
+            if limit is not None and pagination["total_count"] > 0:
+                summary = f"{zone.name} contains {pagination['total_count']} visible entities (none in this page)"
+            else:
+                summary = f"{zone.name} appears empty"
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_scene_info(
+        self, state: GameState, detail_level: str, fields: Optional[List[str]] = None
+    ) -> tuple[Dict[str, Any], str]:
+        """Get scene information."""
+        scene = state.scene
+
+        facts: Dict[str, Any] = {
+            "topic": "scene",
+            "scene_id": scene.id,
+            "round": scene.round,
+            "turn_index": scene.turn_index,
+            "base_dc": scene.base_dc,
+            "tags": scene.tags.copy(),
+        }
+
+        if detail_level == "full":
+            facts["turn_order"] = scene.turn_order
+            facts["objective"] = scene.objective
+            facts["pending_choice"] = scene.pending_choice
+            facts["choice_count_this_turn"] = scene.choice_count_this_turn
+
+        summary = f"Round {scene.round}, scene is {scene.tags.get('alert', 'normal')} alert with {scene.tags.get('lighting', 'normal')} lighting"
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_effects_info(
+        self,
+        target: str,
+        state: GameState,
+        detail_level: str,
+        fields: Optional[List[str]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """Get effects information about an entity."""
+        if target not in state.entities:
+            raise ValueError(f"Entity {target} not found")
+
+        entity = state.entities[target]
+
+        facts: Dict[str, Any] = {
+            "topic": "effects",
+            "entity_id": target,
+            "active_effects": [],
+        }
+
+        # Check for various effects
+        if entity.type in ("pc", "npc"):
+            living_entity = cast(Union[PC, NPC], entity)
+
+            # Guard effects
+            if getattr(living_entity, "guard", 0) > 0:
+                guard_duration = getattr(living_entity, "guard_duration", 0)
+                facts["active_effects"].append(
+                    {
+                        "type": "guard",
+                        "value": living_entity.guard,
+                        "duration": guard_duration,
+                    }
+                )
+
+            # Mark effects
+            marks = getattr(living_entity, "marks", {})
+            for mark_key, mark_data in marks.items():
+                facts["active_effects"].append(
+                    {
+                        "type": "mark",
+                        "key": mark_key,
+                        "tag": mark_data.get("tag", "unknown"),
+                        "source": mark_data.get("source", "unknown"),
+                        "value": mark_data.get("value", 1),
+                    }
+                )
+
+            # Tag effects
+            if entity.tags:
+                for tag_key, tag_value in entity.tags.items():
+                    facts["active_effects"].append(
+                        {"type": "tag", "key": tag_key, "value": tag_value}
+                    )
+
+        effect_count = len(facts["active_effects"])
+        if effect_count > 0:
+            summary = f"{entity.name} has {effect_count} active effects"
+        else:
+            summary = f"{entity.name} has no active effects"
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_clocks_info(
+        self,
+        state: GameState,
+        detail_level: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        fields: Optional[List[str]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """Get clocks information with visibility filtering."""
+        facts: Dict[str, Any] = {
+            "topic": "clocks",
+            "active_clocks": {},
+            "clock_count": 0,  # Will be updated after filtering
+        }
+
+        # Sort clocks by ID for deterministic ordering
+        sorted_clock_ids = sorted(state.clocks.keys())
+
+        # Apply pagination to clock IDs
+        paginated_clock_ids, pagination = self._apply_pagination(
+            sorted_clock_ids, limit, offset
+        )
+
+        visible_clocks = {}
+        hidden_clock_count = 0
+
+        for clock_id in paginated_clock_ids:
+            clock_data = state.clocks[clock_id]
+            if is_clock_visible_to(clock_data):
+                clock_info = {
+                    "id": clock_id,  # Include ID for consistency
+                    "value": clock_data["value"],
+                    "max": clock_data.get("max", 10),
+                    "min": clock_data.get("min", 0),
+                }
+
+                if detail_level == "full":
+                    clock_info.update(
+                        {
+                            "source": clock_data.get("source", "unknown"),
+                            "created_turn": clock_data.get("created_turn", 0),
+                            "last_modified_turn": clock_data.get(
+                                "last_modified_turn", 0
+                            ),
+                            "last_modified_by": clock_data.get(
+                                "last_modified_by", "unknown"
+                            ),
+                            "filled_this_turn": clock_data.get(
+                                "filled_this_turn", False
+                            ),
+                        }
+                    )
+
+                visible_clocks[clock_id] = clock_info
+            else:
+                hidden_clock_count += 1
+
+        # Add redacted placeholders for hidden clocks (deterministic naming)
+        for i in range(hidden_clock_count):
+            visible_clocks[f"[hidden_clock_{i+1}]"] = {
+                "id": f"[hidden_clock_{i+1}]",
+                "value": "[hidden]",
+                "max": "[hidden]",
+                "min": "[hidden]",
+            }
+
+        facts: Dict[str, Any] = {
+            "topic": "clocks",
+            "active_clocks": visible_clocks,
+            "clock_count": len(visible_clocks) - hidden_clock_count,
+        }
+
+        # Add pagination metadata if pagination was applied
+        if limit is not None or offset > 0:
+            facts["pagination"] = pagination
+
+        total_clocks = len(state.clocks)
+        visible_count = len(visible_clocks) - hidden_clock_count
+
+        if visible_count > 0:
+            if limit is not None and pagination["has_more"]:
+                summary = f"{visible_count} visible clocks (showing {len(paginated_clock_ids)})"
+            else:
+                summary = f"{visible_count} visible clocks are running"
+            if hidden_clock_count > 0:
+                summary += f" (+{hidden_clock_count} hidden)"
+        else:
+            if limit is not None and pagination["total_count"] > 0:
+                summary = f"No visible clocks in this page ({pagination['total_count']} total)"
+            else:
+                summary = "No visible clocks" + (
+                    f" ({hidden_clock_count} hidden)" if hidden_clock_count > 0 else ""
+                )
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_relationships_info(
+        self,
+        target: str,
+        state: GameState,
+        detail_level: str,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        fields: Optional[List[str]] = None,
+    ) -> tuple[Dict[str, Any], str]:
+        """Get relationships and marks information with deterministic ordering."""
+        if target not in state.entities:
+            raise ValueError(f"Entity {target} not found")
+
+        entity = state.entities[target]
+
+        facts: Dict[str, Any] = {
+            "topic": "relationships",
+            "entity_id": target,
+            "relationships": {},
+        }
+
+        if entity.type in ("pc", "npc"):
+            living_entity = cast(Union[PC, NPC], entity)
+            marks = getattr(living_entity, "marks", {})
+
+            # Group marks by source to show relationships, sort sources for consistency
+            for mark_key, mark_data in marks.items():
+                source = mark_data.get("source", "unknown")
+                tag = mark_data.get("tag", "unknown")
+
+                if source not in facts["relationships"]:
+                    facts["relationships"][source] = []
+
+                relationship = {"tag": tag, "value": mark_data.get("value", 1)}
+
+                if detail_level == "full":
+                    relationship.update(
+                        {
+                            "created_turn": mark_data.get("created_turn", 0),
+                            "consumes": mark_data.get("consumes", True),
+                        }
+                    )
+
+                facts["relationships"][source].append(relationship)
+
+            # Sort relationships within each source by tag name for consistency
+            for source in facts["relationships"]:
+                facts["relationships"][source].sort(key=lambda r: r["tag"])
+
+        # Apply pagination to relationships if requested
+        if limit is not None or offset > 0:
+            all_relationships = []
+            for source in sorted(facts["relationships"].keys()):
+                for rel in facts["relationships"][source]:
+                    all_relationships.append((source, rel))
+
+            paginated_relationships, pagination = self._apply_pagination(
+                all_relationships, limit, offset
+            )
+
+            # Rebuild relationships dict from paginated results
+            paginated_relationships_dict = {}
+            for source, rel in paginated_relationships:
+                if source not in paginated_relationships_dict:
+                    paginated_relationships_dict[source] = []
+                paginated_relationships_dict[source].append(rel)
+
+            facts["relationships"] = paginated_relationships_dict
+            facts["pagination"] = pagination
+
+        relationship_count = len(facts["relationships"])
+        if relationship_count > 0:
+            # Sort sources for deterministic output
+            sources = sorted(facts["relationships"].keys())
+            if (
+                limit is not None
+                and "pagination" in facts
+                and facts["pagination"]["has_more"]
+            ):
+                summary = f"{entity.name} has relationships with {facts['pagination']['total_count']} total entities (showing {relationship_count}): {', '.join(sources)}"
+            else:
+                summary = f"{entity.name} has relationships with {relationship_count} entities: {', '.join(sources)}"
+        else:
+            if (
+                limit is not None
+                and "pagination" in facts
+                and facts["pagination"]["total_count"] > 0
+            ):
+                summary = f"{entity.name} has {facts['pagination']['total_count']} relationships (none in this page)"
+            else:
+                summary = f"{entity.name} has no recorded relationships"
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
+
+    def _get_rules_info(
+        self, state: GameState, detail_level: str, fields: Optional[List[str]] = None
+    ) -> tuple[Dict[str, Any], str]:
+        """Get rules and mechanics information."""
+        facts: Dict[str, Any] = {
+            "topic": "rules",
+            "base_dc": state.scene.base_dc,
+            "current_round": state.scene.round,
+        }
+
+        if detail_level == "full":
+            facts.update(
+                {
+                    "dc_ranges": {
+                        "trivial": "5-8",
+                        "easy": "9-11",
+                        "moderate": "12-14",
+                        "hard": "15-17",
+                        "extreme": "18-20",
+                    },
+                    "outcomes": {
+                        "crit_success": "Natural 20 or margin >= 5",
+                        "success": "Margin >= 0",
+                        "partial": "Margin >= -3",
+                        "fail": "Margin < -3",
+                    },
+                    "style_domains": {
+                        "d4": "Careful/precise actions",
+                        "d6": "Balanced approach",
+                        "d8": "Bold/risky actions",
+                    },
+                    "scene_tags": state.scene.tags.copy(),
+                }
+            )
+
+        summary = (
+            f"Base DC is {state.scene.base_dc}, currently round {state.scene.round}"
+        )
+
+        # Apply field filtering
+        facts = self._filter_fields(facts, fields)
+
+        return facts, summary
 
     def _execute_narrate_only(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int

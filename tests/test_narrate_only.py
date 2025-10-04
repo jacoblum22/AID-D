@@ -73,6 +73,17 @@ def create_demo_state() -> GameState:
 
 def test_narrate_only_tool():
     """Test the narrate_only tool with various topics."""
+    successful_tests, failed_tests = run_narrate_only_tool_tests()
+
+    # Make assertions for pytest
+    assert (
+        successful_tests > 0
+    ), f"Should have some successful tests, got {successful_tests}"
+    assert failed_tests == 0, f"Should have no failed tests, got {failed_tests}"
+
+
+def run_narrate_only_tool_tests():
+    """Utility function to test the narrate_only tool - returns counts for external use."""
 
     print("=== Testing narrate_only Tool Implementation ===\n")
 
@@ -211,7 +222,7 @@ def test_topic_inference():
 if __name__ == "__main__":
     try:
         test_topic_inference()
-        success_count, fail_count = test_narrate_only_tool()
+        success_count, fail_count = run_narrate_only_tool_tests()
 
         if fail_count == 0:
             print("🎉 All narrate_only tests passed!")

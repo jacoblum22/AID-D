@@ -33,7 +33,7 @@ They will be enhanced in future development phases.
 """
 
 from typing import Dict, List, Optional, Any, Callable, Union, Literal, Annotated
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import re
 
 
@@ -115,10 +115,31 @@ class NarrateOnlyArgs(ToolArgs):
 
 
 class GetInfoArgs(ToolArgs):
-    """Arguments for get_info tool."""
+    """Arguments for get_info tool with size control."""
 
-    query: str
-    scope: str = "current_zone"  # "current_zone", "actor", "inventory", etc.
+    actor: Optional[str] = None  # POV actor (who's asking)
+    target: Optional[str] = None  # Entity to inspect (actor, item, zone)
+    topic: Literal[
+        "status",
+        "inventory",
+        "zone",
+        "scene",
+        "effects",
+        "clocks",
+        "relationships",
+        "rules",
+    ] = "status"
+    detail_level: Literal["brief", "full"] = "brief"
+
+    # Size control parameters
+    limit: Optional[int] = Field(
+        default=None, ge=1, le=100, description="Max items to return (1-100)"
+    )
+    offset: Optional[int] = 0  # Items to skip for pagination
+    fields: Optional[List[str]] = None  # Specific fields to include
+
+    # Structure control parameters
+    use_refs: bool = False  # Use refs structure to reduce duplication
 
 
 class ApplyEffectsArgs(ToolArgs):
@@ -180,8 +201,7 @@ class Tool(BaseModel):
     suggest_args: Optional[Callable[[Any, Any], Dict[str, Any]]] = None
     args_schema: type[ToolArgs]
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 # Precondition functions
@@ -788,8 +808,10 @@ TOOL_CATALOG: List[Tool] = [
         desc="Query current game state information.",
         precond=get_info_precond,
         suggest_args=lambda state, utterance: {
-            "query": utterance.text,
-            "scope": "current_zone",
+            "actor": state.current_actor,
+            "target": None,
+            "topic": "status",
+            "detail_level": "brief",
         },
         args_schema=GetInfoArgs,
     ),

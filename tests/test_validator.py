@@ -621,7 +621,12 @@ def test_get_info_execution(demo_state):
 
     result = validate_and_execute(
         "get_info",
-        {"query": "What do I see?", "scope": "current_zone"},
+        {
+            "actor": "pc.arin",
+            "target": "pc.arin",
+            "topic": "zone",
+            "detail_level": "brief",
+        },
         demo_state,
         utterance,
         seed=22222,
@@ -629,15 +634,20 @@ def test_get_info_execution(demo_state):
 
     assert result.ok is True, f"get_info should succeed: {result.error_message}"
     assert result.tool_id == "get_info"
-    # Should contain zone information
+    # Should contain zone information in new format
     expected_keys = [
-        "zone_name",
-        "zone_description",
-        "visible_actors",
+        "topic",
+        "zone_id",
+        "name",
+        "entities",
         "adjacent_zones",
     ]
     for key in expected_keys:
         assert key in result.facts, f"get_info should return {key}"
+
+    # Check specific values
+    assert result.facts["topic"] == "zone"
+    assert result.facts["zone_id"] == "courtyard"
 
 
 def test_schema_validation_failure(demo_state):
