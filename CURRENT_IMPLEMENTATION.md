@@ -105,9 +105,27 @@ tests/           # Comprehensive test suite
 - Enhanced narration hints with options_summary for clean UI presentation
 - **Status**: Production ready
 
+#### ✅ **talk** (Fully Implemented)
+- Complete Style+Domain social interaction mechanics
+- 7 intent types: persuade, intimidate, deceive, charm, comfort, request, distract
+- Sophisticated argument suggestion with verb-to-intent mapping
+- Effect generation for marks, guards, and clock adjustments
+- Target validation for social creatures and visibility rules
+- Comprehensive test coverage with all intents and edge cases
+- **Status**: Production ready
+
+#### ✅ **use_item** (Fully Implemented)
+- Complete item usage system with comprehensive registry (15+ items)
+- Support for weapons, consumables, tools, and scrolls
+- Sophisticated validation pipeline (item existence, charges, target validation)
+- Effect resolution for damage, healing, buffs, and environmental changes
+- Delegation system for complex items (scrolls delegate to attack tool)
+- Inventory management with charge tracking and consumption
+- Equipment handling for weapons and armor
+- Comprehensive test coverage with all item types and scenarios
+- **Status**: Production ready
+
 #### 🚧 **Placeholder Implementations:**
-- `talk`: Basic social interactions
-- `use_item`: Basic item usage
 - `get_info`: State querying
 - `apply_effects`: Direct effect application
 
@@ -182,6 +200,8 @@ tests/           # Comprehensive test suite
 - `test_attack.py`
 - `test_move.py`
 - `test_ask_clarifying.py`
+- `test_talk.py`
+- `test_use_item.py`
 - `test_effects.py`
 - `test_game_state.py`
 - `test_narrate_only.py`
@@ -251,13 +271,13 @@ pytest>=7.0.0
 
 ### What Works Now
 - Game state management and entity modeling
-- Tool system with **five fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, and `ask_clarifying`)
+- Tool system with **seven fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, `ask_clarifying`, `talk`, and `use_item`)
 - Effect system for state changes including new tag effects
 - Validation and execution pipeline with pending choice consumption
 - Comprehensive testing
 
 ### What's Ready for Enhancement
-- Tool implementations (talk, use_item, get_info, apply_effects - 4 remaining placeholder tools)
+- Tool implementations (get_info, apply_effects - 2 remaining placeholder tools)
 - Persistence and logging
 - World state management
 
