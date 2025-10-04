@@ -102,6 +102,8 @@ class AffordanceFilter:
             enriched = self._enrich_attack_args(enriched, state, utterance)
         elif tool.id == "talk":
             enriched = self._enrich_talk_args(enriched, state, utterance)
+        elif tool.id == "get_info":
+            enriched = self._enrich_get_info_args(enriched, state, utterance)
         elif tool.id == "narrate_only":
             enriched = self._enrich_narrate_only_args(enriched, state, utterance)
         elif tool.id == "ask_clarifying":
@@ -224,6 +226,66 @@ class AffordanceFilter:
                     enriched["relationship"] = "authority_figure"
                 elif hasattr(target_actor, "type") and target_actor.type == "npc":
                     enriched["relationship"] = "stranger"
+
+        return enriched
+
+    def _enrich_get_info_args(
+        self, args: Dict[str, Any], state: GameState, utterance: Utterance
+    ) -> Dict[str, Any]:
+        """Enrich get_info arguments with topic and target detection."""
+        enriched = args.copy()
+
+        text_lower = utterance.text.lower()
+
+        # Topic detection from utterance keywords
+        topic_keywords = {
+            "status": ["hp", "health", "condition", "stats", "hurt", "wounded"],
+            "inventory": ["inventory", "items", "bag", "pouch", "carrying", "have"],
+            "zone": ["here", "room", "area", "place", "who", "where", "around"],
+            "scene": ["lighting", "noise", "alert", "atmosphere", "scene"],
+            "effects": ["effects", "buffs", "debuffs", "conditions", "magic"],
+            "clocks": ["progress", "time", "clock", "countdown", "timer"],
+            "relationships": ["relationship", "marks", "favor", "reputation"],
+            "rules": ["rules", "mechanics", "dc", "difficulty"],
+        }
+
+        # Find best matching topic
+        best_topic = enriched.get("topic", "status")
+        max_matches = 0
+        for topic, keywords in topic_keywords.items():
+            matches = sum(1 for keyword in keywords if keyword in text_lower)
+            if matches > max_matches:
+                max_matches = matches
+                best_topic = topic
+
+        enriched["topic"] = best_topic
+
+        # Target detection - look for entity mentions
+        if state.current_actor:
+            current_actor = state.actors.get(state.current_actor)
+            if current_actor and hasattr(current_actor, "visible_actors"):
+                # Check if utterance mentions any visible actors
+                for actor_id in current_actor.visible_actors:
+                    actor = state.actors.get(actor_id)
+                    if actor and hasattr(actor, "name"):
+                        if (
+                            actor.name.lower() in text_lower
+                            or actor_id.lower() in text_lower
+                        ):
+                            enriched["target"] = actor_id
+                            break
+
+            # Check for self-reference (only if no target detected yet)
+            if "target" not in enriched and any(
+                word in text_lower for word in ["my", "me", "i", "myself"]
+            ):
+                enriched["target"] = state.current_actor
+
+        # Detail level detection
+        if any(word in text_lower for word in ["full", "detailed", "complete", "all"]):
+            enriched["detail_level"] = "full"
+        elif any(word in text_lower for word in ["brief", "quick", "summary"]):
+            enriched["detail_level"] = "brief"
 
         return enriched
 

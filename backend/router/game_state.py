@@ -8,6 +8,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from enum import Enum
 
 
+class Meta(BaseModel):
+    """Metadata for system-level management (not gameplay state)."""
+
+    created_at: Optional[str] = None  # ISO timestamp
+    last_changed_at: Optional[str] = None
+    visibility: Literal["public", "hidden", "gm_only"] = "public"
+    source: Optional[str] = None  # e.g., "manual", "generator", "import"
+    notes: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
 class Zone(BaseModel):
     """Represents a game zone/location."""
 
@@ -18,6 +29,7 @@ class Zone(BaseModel):
     blocked_exits: List[str] = Field(
         default_factory=list
     )  # Optional list of blocked adjacent zones
+    meta: Meta = Field(default_factory=Meta)
 
 
 class HP(BaseModel):
@@ -47,6 +59,7 @@ class BaseEntity(BaseModel):
     name: str
     current_zone: str
     tags: Dict[str, Any] = Field(default_factory=dict)  # Support for arbitrary tags
+    meta: Meta = Field(default_factory=Meta)
 
 
 class PC(BaseEntity):
@@ -136,6 +149,7 @@ class Scene(BaseModel):
     objective: Dict[str, Any] = Field(default_factory=dict)
     pending_choice: Optional[Dict[str, Any]] = None  # For ask_clarifying tool
     choice_count_this_turn: int = 0  # Max 3 clarifications per turn
+    meta: Meta = Field(default_factory=Meta)
 
 
 class GameState(BaseModel):
@@ -147,7 +161,9 @@ class GameState(BaseModel):
     pending_action: Optional[str] = None
     current_actor: Optional[str] = None
     turn_flags: Dict[str, Any] = Field(default_factory=dict)
-    clocks: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    clocks: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict
+    )  # Enhanced with meta support
 
     # Backward compatibility property
     @property
@@ -155,6 +171,17 @@ class GameState(BaseModel):
         """Get only PC and NPC entities for backward compatibility."""
         filtered = {k: v for k, v in self.entities.items() if v.type in ("pc", "npc")}
         return cast(Dict[str, Union[PC, NPC]], filtered)
+
+
+def is_clock_visible_to(clock_data: Dict[str, Any]) -> bool:
+    """Check if a clock is visible to the given actor."""
+    # Check for meta.visibility in clock data
+    meta = clock_data.get("meta", {})
+    if meta.get("visibility") == "gm_only":
+        return False
+    if meta.get("visibility") == "hidden":
+        return False
+    return True
 
 
 class Utterance(BaseModel):
@@ -196,3 +223,50 @@ class Utterance(BaseModel):
             "investigate",
         }
         return any(verb in self.text.lower() for verb in action_verbs)
+
+
+def is_visible_to(entity: BaseEntity, scene: Optional[Scene] = None) -> bool:
+    """Check if an entity is visible to the given actor.
+
+    Args:
+        entity: The entity being checked
+        scene: Current scene for environmental visibility rules
+
+    Returns:
+        True if the entity should be visible to the actor
+    """
+    # GM-only content is never visible unless explicitly in GM mode
+    if entity.meta.visibility == "gm_only":
+        return False
+
+    # Explicit hidden visibility
+    if entity.meta.visibility == "hidden":
+        return False
+
+    # Scene-based visibility rules
+    if scene and scene.meta.visibility == "gm_only":
+        return False
+
+    # Dark lighting rules (future enhancement)
+    if scene and scene.tags.get("lighting") == "dark":
+        # Future: check for darkvision, light sources, etc.
+        pass
+
+    return True
+
+
+def is_zone_visible_to(zone: "Zone", scene: Optional[Scene] = None) -> bool:
+    """Check if a zone is visible to the given actor."""
+    # GM-only content is never visible unless explicitly in GM mode
+    if zone.meta.visibility == "gm_only":
+        return False
+
+    # Explicit hidden visibility
+    if zone.meta.visibility == "hidden":
+        return False
+
+    # Scene-based visibility rules
+    if scene and scene.meta.visibility == "gm_only":
+        return False
+
+    return True
