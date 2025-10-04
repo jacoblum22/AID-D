@@ -1,0 +1,186 @@
+{
+  "healing_potion": {
+    "id": "healing_potion",
+    "name": "Healing Potion",
+    "description": "Restores health when drunk. A shimmering red liquid in a crystal vial.",
+    "tags": ["consumable", "healing", "magical", "liquid"],
+    "usage_methods": ["consume"],
+    "charges": 1,
+    "value": 50,
+    "rarity": "common",
+    "effects": [
+      {
+        "type": "hp",
+        "delta": "2d4+2",
+        "target_type": "self_or_ally"
+      }
+    ]
+  },
+  "poison_vial": {
+    "id": "poison_vial",
+    "name": "Poison Vial",
+    "description": "A deadly toxin in a dark glass bottle. Handle with care.",
+    "tags": ["consumable", "poison", "dangerous", "liquid"],
+    "usage_methods": ["consume"],
+    "charges": 1,
+    "value": 75,
+    "rarity": "uncommon",
+    "effects": [
+      {
+        "type": "hp",
+        "delta": "-1d6",
+        "target_type": "enemy"
+      }
+    ]
+  },
+  "lantern": {
+    "id": "lantern",
+    "name": "Lantern",
+    "description": "A sturdy brass lantern that provides bright illumination.",
+    "tags": ["illumination", "mundane", "reusable", "tool"],
+    "usage_methods": ["activate"],
+    "charges": 10,
+    "value": 20,
+    "rarity": "common",
+    "effects": [
+      {
+        "type": "tag",
+        "target": "scene",
+        "add": {"lighting": "bright"}
+      }
+    ]
+  },
+  "rope": {
+    "id": "rope",
+    "name": "Rope",
+    "description": "50 feet of strong hemp rope. Essential for climbing and traversal.",
+    "tags": ["consumable", "mundane", "tool", "utility"],
+    "usage_methods": ["consume"],
+    "charges": 1,
+    "value": 10,
+    "rarity": "common",
+    "effects": [
+      {
+        "type": "mark",
+        "tag": "climbing_advantage",
+        "value": 1
+      }
+    ]
+  },
+  "scroll_fireball": {
+    "id": "scroll_fireball",
+    "name": "Scroll of Fireball",
+    "description": "A magical scroll inscribed with arcane runes. When read, unleashes devastating fire magic.",
+    "tags": ["consumable", "magical", "scroll", "fire", "area_effect"],
+    "usage_methods": ["read"],
+    "charges": 1,
+    "value": 150,
+    "rarity": "rare",
+    "delegation": {
+      "tool": "attack",
+      "args_override": {
+        "weapon": "magical_fire",
+        "damage_expr": "3d6",
+        "dc_hint": 15,
+        "attack_mode": "scroll"
+      }
+    },
+    "area_effect": {
+      "type": "zone",
+      "radius": 1
+    }
+  },
+  "sword": {
+    "id": "sword",
+    "name": "Sword",
+    "description": "A well-balanced steel blade with a leather-wrapped hilt.",
+    "tags": ["weapon", "melee", "mundane", "equipable"],
+    "usage_methods": ["equip"],
+    "charges": -1,
+    "value": 100,
+    "rarity": "common",
+    "effects": [
+      {
+        "type": "guard",
+        "delta": 1
+      }
+    ]
+  },
+  "cursed_ring": {
+    "id": "cursed_ring",
+    "name": "Cursed Ring of Weakness",
+    "description": "A tarnished silver ring that radiates malevolent energy.",
+    "tags": ["cursed", "magical", "equipable", "jewelry"],
+    "usage_methods": ["equip"],
+    "charges": -1,
+    "value": 0,
+    "rarity": "cursed",
+    "effects": [
+      {
+        "type": "hp",
+        "delta": 5,
+        "target_type": "self"
+      }
+    ],
+    "curse_effects": [
+      {
+        "type": "hp",
+        "delta": -2,
+        "target_type": "self",
+        "duration": "permanent"
+      },
+      {
+        "type": "mark",
+        "tag": "weakness",
+        "value": -1,
+        "target_type": "self"
+      }
+    ]
+  },
+  "potion_persuasion": {
+    "id": "potion_persuasion",
+    "name": "Potion of Silver Tongue",
+    "description": "A shimmering blue potion that enhances charisma and eloquence.",
+    "tags": ["consumable", "magical", "social", "liquid"],
+    "usage_methods": ["consume"],
+    "charges": 1,
+    "value": 100,
+    "rarity": "uncommon",
+    "delegation": {
+      "tool": "talk",
+      "args_override": {
+        "style": 3,
+        "adv_style_delta": 1
+      },
+      "effect_duration": 3
+    }
+  },
+  "grappling_hook": {
+    "id": "grappling_hook",
+    "name": "Grappling Hook",
+    "description": "A steel hook attached to 30 feet of rope. Perfect for scaling walls and traversing gaps.",
+    "tags": ["tool", "mundane", "traversal", "reusable"],
+    "usage_methods": ["activate", "consume"],
+    "charges": 5,
+    "value": 75,
+    "rarity": "uncommon",
+    "delegation": {
+      "tool": "move",
+      "args_override": {
+        "method": "climb",
+        "ignore_adjacency": true
+      }
+    }
+  },
+  "mystery_item": {
+    "id": "mystery_item",
+    "name": "Mysterious Object",
+    "description": "An unidentified item of unknown purpose.",
+    "tags": ["unknown", "mundane"],
+    "usage_methods": ["consume"],
+    "charges": 1,
+    "value": 1,
+    "rarity": "common",
+    "effects": []
+  }
+}

@@ -382,6 +382,49 @@ def apply_noise(state: GameState, e: Dict[str, Any]) -> None:
     # - Advance detection clocks
 
 
+@effect("inventory")
+def apply_inventory(state: GameState, e: Dict[str, Any]) -> None:
+    """Apply inventory changes to an entity."""
+    target_id = e["target"]
+    item_id = e.get("item")
+    delta = e.get("delta", 0)
+
+    if target_id not in state.entities:
+        raise ValueError(f"Inventory effect target not found: {target_id}")
+
+    entity = state.entities[target_id]
+
+    # Type-safe check for entities with inventory
+    if entity.type not in ("pc", "npc"):
+        raise ValueError(f"inventory effect on non-creature: {entity.type}")
+
+    # Type cast for static analysis
+    creature = cast(Union[PC, NPC], entity)
+
+    if not hasattr(creature, "inventory"):
+        raise ValueError(f"Entity {target_id} does not have inventory")
+
+    current_inventory = creature.inventory.copy()
+
+    if item_id:
+        if delta > 0:
+            # Add items
+            for _ in range(delta):
+                current_inventory.append(item_id)
+        elif delta < 0:
+            # Remove items
+            items_to_remove = abs(delta)
+            for _ in range(items_to_remove):
+                if item_id in current_inventory:
+                    current_inventory.remove(item_id)
+                else:
+                    break
+
+    # Update entity using Pydantic's copy mechanism
+    updated_entity = creature.model_copy(update={"inventory": current_inventory})
+    state.entities[target_id] = updated_entity
+
+
 def get_registered_effects() -> List[str]:
     """Get list of all registered effect types."""
     return list(EFFECT_REGISTRY.keys())
