@@ -701,7 +701,7 @@ def suggest_ask_clarifying_args(state, utterance) -> Dict[str, Any]:
                 "id": "B",
                 "label": "Get more information",
                 "tool_id": "get_info",
-                "args_patch": {"query": "current situation", "scope": "current_zone"},
+                "args_patch": {"topic": "zone", "detail_level": "brief"},
                 "category": "info",
                 "risk_hint": "safe",
                 "tags": ["information", "assessment"],

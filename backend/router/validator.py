@@ -3286,6 +3286,7 @@ class Validator:
         # Validate target visibility if it's an entity
         if target and target in state.entities:
             entity = state.entities[target]
+            # Check scene-level visibility (Meta system)
             if not is_visible_to(entity, state.scene):
                 return ToolResult(
                     ok=False,
@@ -3303,6 +3304,62 @@ class Validator:
                     },
                     error_message=f"Target '{target}' not visible to actor",
                 )
+
+            # Check actor POV visibility (visible_actors list) - only for PC/NPC targets
+            if (
+                actor
+                and actor in state.entities
+                and target != actor
+                and entity.type in ("pc", "npc")
+            ):
+                requesting_actor = state.entities[actor]
+                # Only PC and NPC entities have visible_actors list
+                if requesting_actor.type in ("pc", "npc"):
+                    # Safe to cast since we checked the type
+                    from .game_state import PC, NPC
+
+                    actor_with_vision = cast(Union[PC, NPC], requesting_actor)
+                    if target not in actor_with_vision.visible_actors:
+                        return ToolResult(
+                            ok=False,
+                            tool_id="ask_clarifying",
+                            args={
+                                "question": f"I don't see '{target}' here. What would you like to check instead?",
+                                "reason": "invalid_target",
+                            },
+                            facts={},
+                            effects=[],
+                            narration_hint={
+                                "summary": f"Asked for clarification - '{target}' not in actor's view",
+                                "tone_tags": ["helpful"],
+                                "salient_entities": [actor],
+                            },
+                            error_message=f"Target '{target}' not visible to actor '{actor}'",
+                        )
+
+            # For objects (not items), check zone-based visibility
+            elif entity.type == "object" and actor and actor in state.entities:
+                requesting_actor = state.entities[actor]
+                if hasattr(requesting_actor, "current_zone") and hasattr(
+                    entity, "current_zone"
+                ):
+                    if requesting_actor.current_zone != entity.current_zone:
+                        return ToolResult(
+                            ok=False,
+                            tool_id="ask_clarifying",
+                            args={
+                                "question": f"I don't see '{target}' here. What would you like to check instead?",
+                                "reason": "invalid_target",
+                            },
+                            facts={},
+                            effects=[],
+                            narration_hint={
+                                "summary": f"Asked for clarification - '{target}' object not in current zone",
+                                "tone_tags": ["helpful"],
+                                "salient_entities": [actor],
+                            },
+                            error_message=f"Object '{target}' not in same zone as actor '{actor}'",
+                        )
 
         # Generate facts based on topic
         facts = {}

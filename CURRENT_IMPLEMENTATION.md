@@ -60,7 +60,7 @@ tests/           # Comprehensive test suite
 - Precondition functions for tool availability
 - Argument suggestion functions
 
-**Implemented Tools (9 total):**
+**Implemented Tools (8 total):**
 
 #### ✅ **ask_roll** (Fully Implemented)
 - Complete dice mechanics with Style+Domain system
@@ -125,8 +125,20 @@ tests/           # Comprehensive test suite
 - Comprehensive test coverage with all item types and scenarios
 - **Status**: Production ready
 
+#### ✅ **get_info** (Fully Implemented)
+- Complete authoritative game state querying system
+- 8 topic handlers: status, inventory, zone, scene, effects, clocks, relationships, rules
+- Meta system with visibility controls (public/hidden/gm_only) 
+- Perception guards preventing information leaks about hidden entities
+- Deterministic ordering for stable, reproducible output
+- Size control with pagination (limit/offset) and field projection
+- Schema versioning with query metadata and replay support
+- Refs map structure reducing duplication and improving LLM grounding
+- Hybrid visibility model: PC/NPC use visible_actors, objects use zone-based, items use memory-based
+- Machine-readable structured facts with comprehensive error handling
+- **Status**: Production ready
+
 #### 🚧 **Placeholder Implementations:**
-- `get_info`: State querying
 - `apply_effects`: Direct effect application
 
 **Features:**
@@ -185,14 +197,30 @@ tests/           # Comprehensive test suite
 - Structured narration hints for future LLM integration
 - No state mutation (pure narration)
 
-### 6. Router Components
+### 8. Code Quality & Robustness
+
+**Recent Improvements:**
+- **Schema Consistency**: Updated ask_clarifying to use new get_info schema (topic/detail_level)
+- **Target Detection**: Fixed self-pronoun override to preserve detected NPC targets
+- **Visibility Enforcement**: Added proper actor POV checks preventing information leaks
+- **Test Robustness**: Added pytest.skip() for missing API key scenarios
+- **Deterministic Hashing**: Replaced non-deterministic hash() with hashlib.md5 for snapshot IDs
+- **Field Validation**: Added Pydantic constraints for limit field (1-100 range)
+
+**Visibility System:**
+- **PC/NPC entities**: Enforced via visible_actors list (security)
+- **Objects**: Zone-based visibility (tactical realism)  
+- **Items**: Memory-based access (narrative flexibility)
+- **Meta system**: GM-only and hidden content protection
+
+### 9. Router Components
 
 **Implemented:**
 - `affordances.py`: Tool availability checking
 - `planner.py`: Tool selection logic
 - Core router infrastructure
 
-### 7. Test Suite (Comprehensive)
+### 10. Test Suite (Comprehensive)
 
 **Test Coverage:**
 - `test_affordances.py`
@@ -202,6 +230,7 @@ tests/           # Comprehensive test suite
 - `test_ask_clarifying.py`
 - `test_talk.py`
 - `test_use_item.py`
+- `test_get_info.py`
 - `test_effects.py`
 - `test_game_state.py`
 - `test_narrate_only.py`
@@ -271,13 +300,13 @@ pytest>=7.0.0
 
 ### What Works Now
 - Game state management and entity modeling
-- Tool system with **seven fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, `ask_clarifying`, `talk`, and `use_item`)
+- Tool system with **eight fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, `ask_clarifying`, `talk`, `use_item`, and `get_info`)
 - Effect system for state changes including new tag effects
 - Validation and execution pipeline with pending choice consumption
 - Comprehensive testing
 
 ### What's Ready for Enhancement
-- Tool implementations (get_info, apply_effects - 2 remaining placeholder tools)
+- Tool implementations (apply_effects - 1 remaining placeholder tool)
 - Persistence and logging
 - World state management
 

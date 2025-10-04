@@ -275,8 +275,10 @@ class AffordanceFilter:
                             enriched["target"] = actor_id
                             break
 
-            # Check for self-reference
-            if any(word in text_lower for word in ["my", "me", "i", "myself"]):
+            # Check for self-reference (only if no target detected yet)
+            if "target" not in enriched and any(
+                word in text_lower for word in ["my", "me", "i", "myself"]
+            ):
                 enriched["target"] = state.current_actor
 
         # Detail level detection

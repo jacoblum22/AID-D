@@ -8,6 +8,7 @@ formats it into a numbered menu, and gets LLM to choose a tool.
 import sys
 import os
 import json
+import pytest
 
 # Add the backend directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "backend"))
@@ -70,6 +71,10 @@ def create_demo_state() -> GameState:
 def test_planner_integration():
     """Test the full planner integration with LLM."""
     successful_tests, failed_tests = run_planner_integration_tests()
+
+    # Skip if no tests were executed (missing API key)
+    if successful_tests == 0 and failed_tests == 0:
+        pytest.skip("No planner tests executed - API key not configured")
 
     # Make assertions for pytest
     assert (
