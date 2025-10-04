@@ -198,7 +198,7 @@ def test_use_item_execution(demo_state):
 
     result = validate_and_execute(
         "use_item",
-        {"actor": "pc.arin", "item": "healing_potion", "target": "pc.arin"},
+        {"actor": "pc.arin", "item_id": "healing_potion", "target": "pc.arin"},
         demo_state,
         utterance,
         seed=11111,
@@ -206,8 +206,413 @@ def test_use_item_execution(demo_state):
 
     assert result.ok is True, f"use_item should succeed: {result.error_message}"
     assert result.tool_id == "use_item"
-    assert "item_used" in result.facts
-    assert result.facts["item_used"] == "healing_potion"
+    assert "item_id" in result.facts
+    assert result.facts["item_id"] == "healing_potion"
+
+
+def test_use_item_healing_potion(demo_state):
+    """Test using a healing potion increases HP and consumes item."""
+    # First, reduce PC's HP so healing can have an effect
+    from router.game_state import HP
+
+    damaged_hp = HP(current=10, max=20)  # Reduce from full HP
+    demo_state.entities["pc.arin"] = demo_state.entities["pc.arin"].model_copy(
+        update={"hp": damaged_hp}
+    )
+
+    initial_hp = demo_state.entities["pc.arin"].hp.current
+    initial_inventory = demo_state.entities["pc.arin"].inventory.copy()
+
+    assert (
+        "healing_potion" in initial_inventory
+    ), "Should have healing potion in inventory"
+    assert initial_hp == 10, "PC should start with reduced HP"
+
+    utterance = Utterance(text="I drink my healing potion", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "healing_potion", "method": "consume"},
+        demo_state,
+        utterance,
+        seed=12345,  # Fixed seed for consistent dice rolls
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check HP increased
+    final_hp = demo_state.entities["pc.arin"].hp.current
+    assert final_hp > initial_hp, f"HP should increase: {initial_hp} -> {final_hp}"
+
+    # Check item was consumed
+    final_inventory = demo_state.entities["pc.arin"].inventory
+    assert "healing_potion" not in final_inventory, "Healing potion should be consumed"
+
+    # Check effects were applied
+    hp_effects = [e for e in result.effects if e["type"] == "hp"]
+    inventory_effects = [e for e in result.effects if e["type"] == "inventory"]
+
+    assert len(hp_effects) == 1, "Should have one HP effect"
+    assert hp_effects[0]["delta"] > 0, "HP effect should be positive"
+    assert len(inventory_effects) == 1, "Should have one inventory effect"
+    assert inventory_effects[0]["delta"] == -1, "Should remove one item"
+
+
+def test_use_item_poison_vial_on_target(demo_state):
+    """Test using poison vial on a target deals damage."""
+    initial_hp = demo_state.entities["npc.guard.01"].hp.current
+
+    # Add poison vial to inventory
+    demo_state.entities["pc.arin"].inventory.append("poison_vial")
+
+    utterance = Utterance(text="I throw poison at the guard", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {
+            "actor": "pc.arin",
+            "item_id": "poison_vial",
+            "target": "npc.guard.01",
+            "method": "consume",
+        },
+        demo_state,
+        utterance,
+        seed=54321,  # Fixed seed
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check target took damage
+    final_hp = demo_state.entities["npc.guard.01"].hp.current
+    assert (
+        final_hp < initial_hp
+    ), f"Target HP should decrease: {initial_hp} -> {final_hp}"
+
+    # Check item was consumed
+    assert "poison_vial" not in demo_state.entities["pc.arin"].inventory
+
+
+def test_use_item_lantern_activate(demo_state):
+    """Test activating a lantern sets lighting tag."""
+    # Add lantern to inventory
+    demo_state.entities["pc.arin"].inventory.append("lantern")
+
+    utterance = Utterance(text="I light my lantern", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "lantern", "method": "activate"},
+        demo_state,
+        utterance,
+        seed=99999,
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check effects include lighting and activation
+    tag_effects = [e for e in result.effects if e["type"] == "tag"]
+    assert len(tag_effects) >= 1, "Should have tag effects"
+
+    # Lantern should still be in inventory (not consumed)
+    assert "lantern" in demo_state.entities["pc.arin"].inventory
+
+
+def test_use_item_rope_for_mark(demo_state):
+    """Test using rope provides a mark/advantage."""
+    utterance = Utterance(text="I use my rope", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "rope", "method": "consume"},
+        demo_state,
+        utterance,
+        seed=77777,
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check mark effect was applied
+    mark_effects = [e for e in result.effects if e["type"] == "mark"]
+    assert len(mark_effects) == 1, "Should have one mark effect"
+    assert mark_effects[0]["tag"] == "climbing_advantage"
+
+    # Check rope was consumed
+    assert "rope" not in demo_state.entities["pc.arin"].inventory
+
+
+def test_use_item_sword_equip(demo_state):
+    """Test equipping a sword applies defensive bonus."""
+    # Add sword to inventory
+    demo_state.entities["pc.arin"].inventory.append("sword")
+
+    utterance = Utterance(text="I equip my sword", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "sword", "method": "equip"},
+        demo_state,
+        utterance,
+        seed=88888,
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check tag and guard effects
+    tag_effects = [e for e in result.effects if e["type"] == "tag"]
+    guard_effects = [e for e in result.effects if e["type"] == "guard"]
+
+    assert len(tag_effects) >= 1, "Should have tag effects for equipment"
+    assert len(guard_effects) >= 1, "Should have guard effects"
+
+    # Sword should still be in inventory (equipped, not consumed)
+    assert "sword" in demo_state.entities["pc.arin"].inventory
+
+
+def test_use_item_scroll_fireball_read(demo_state):
+    """Test reading a scroll of fireball deals damage."""
+    # Add scroll to inventory
+    demo_state.entities["pc.arin"].inventory.append("scroll_fireball")
+
+    utterance = Utterance(text="I read the fireball scroll", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {
+            "actor": "pc.arin",
+            "item_id": "scroll_fireball",
+            "target": "npc.guard.01",
+            "method": "read",
+        },
+        demo_state,
+        utterance,
+        seed=33333,
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check damage effect
+    hp_effects = [e for e in result.effects if e["type"] == "hp"]
+    assert len(hp_effects) == 1, "Should have one HP effect"
+    assert hp_effects[0]["delta"] < 0, "Should deal damage"
+
+
+def test_use_item_missing_actor(demo_state):
+    """Test use_item with missing actor."""
+    utterance = Utterance(text="I use an item", actor_id="nonexistent")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "nonexistent", "item_id": "healing_potion"},
+        demo_state,
+        utterance,
+        seed=11111,
+    )
+
+    assert result.ok is False, "Should fail with missing actor"
+    assert result.tool_id == "ask_clarifying"
+    assert "don't see that character" in result.args["question"]
+
+
+def test_use_item_missing_item(demo_state):
+    """Test use_item with item not in inventory."""
+    utterance = Utterance(text="I use a missing item", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "nonexistent_item"},
+        demo_state,
+        utterance,
+        seed=22222,
+    )
+
+    assert result.ok is False, "Should fail with missing item"
+    assert result.tool_id == "ask_clarifying"
+    assert "don't have" in result.args["question"]
+    assert "nonexistent_item" in result.args["question"]
+
+
+def test_use_item_unconscious_actor(demo_state):
+    """Test use_item with unconscious actor."""
+    # Set actor HP to 0
+    from router.game_state import HP
+
+    unconscious_hp = HP(current=0, max=10)
+    demo_state.entities["pc.arin"] = demo_state.entities["pc.arin"].model_copy(
+        update={"hp": unconscious_hp}
+    )
+
+    utterance = Utterance(text="I use an item", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "healing_potion"},
+        demo_state,
+        utterance,
+        seed=33333,
+    )
+
+    assert result.ok is False, "Should fail with unconscious actor"
+    assert result.tool_id == "ask_clarifying"
+    assert "unconscious" in result.args["question"]
+
+
+def test_use_item_invalid_target(demo_state):
+    """Test use_item with invalid target."""
+    utterance = Utterance(text="I use potion on invalid target", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {
+            "actor": "pc.arin",
+            "item_id": "healing_potion",
+            "target": "nonexistent_target",
+        },
+        demo_state,
+        utterance,
+        seed=44444,
+    )
+
+    assert result.ok is False, "Should fail with invalid target"
+    assert result.tool_id == "ask_clarifying"
+    assert "can't find" in result.args["question"]
+
+
+def test_use_item_method_mismatch(demo_state):
+    """Test use_item with wrong method for item."""
+    utterance = Utterance(text="I try to activate a potion", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {
+            "actor": "pc.arin",
+            "item_id": "healing_potion",
+            "method": "activate",  # Wrong method, should be "consume"
+        },
+        demo_state,
+        utterance,
+        seed=55555,
+    )
+
+    assert result.ok is False, "Should fail with method mismatch"
+    assert result.tool_id == "ask_clarifying"
+    assert "should be used with method" in result.args["question"]
+
+
+def test_use_item_insufficient_charges(demo_state):
+    """Test use_item with more charges than available."""
+    utterance = Utterance(text="I overuse my potion", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {
+            "actor": "pc.arin",
+            "item_id": "healing_potion",
+            "charges": 5,  # More than the 1 charge available
+        },
+        demo_state,
+        utterance,
+        seed=66666,
+    )
+
+    assert result.ok is False, "Should fail with insufficient charges"
+    assert result.tool_id == "ask_clarifying"
+    assert "only has" in result.args["question"]
+    assert "charges" in result.args["question"]
+
+
+def test_use_item_dice_rolling(demo_state):
+    """Test that dice expressions in item effects are properly rolled."""
+    # Create a test item definition with dice
+    from router.validator import Validator
+    import random
+
+    validator = Validator()
+
+    # Test the dice rolling function directly
+    random.seed(12345)
+    result1 = validator._roll_dice_expression("2d4+2", random)
+    assert isinstance(result1, int), "Should return integer"
+    assert 4 <= result1 <= 10, "2d4+2 should be between 4 and 10"
+
+    # Test negative dice
+    result2 = validator._roll_dice_expression("-1d6", random)
+    assert isinstance(result2, int), "Should return integer"
+    assert -6 <= result2 <= -1, "-1d6 should be between -6 and -1"
+
+    # Test complex expression
+    result3 = validator._roll_dice_expression("3d6+1-1d4", random)
+    assert isinstance(result3, int), "Should return integer"
+
+
+def test_use_item_unknown_item_fallback(demo_state):
+    """Test that unknown items get reasonable default behavior."""
+    # Add unknown item to inventory
+    demo_state.entities["pc.arin"].inventory.append("mystery_item")
+
+    utterance = Utterance(text="I use my mystery item", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "mystery_item"},
+        demo_state,
+        utterance,
+        seed=77777,
+    )
+
+    assert (
+        result.ok is True
+    ), f"use_item should succeed with unknown item: {result.error_message}"
+    assert result.facts["item_id"] == "mystery_item"
+    assert result.facts["method"] == "consume"  # Default method
+
+    # Should consume the item even if it has no effects
+    inventory_effects = [e for e in result.effects if e["type"] == "inventory"]
+    assert len(inventory_effects) == 1, "Should consume unknown item"
+    assert "mystery_item" not in demo_state.entities["pc.arin"].inventory
+
+
+def test_use_item_inventory_effect_registration():
+    """Test that inventory effect is properly registered."""
+    from router.effects import get_registered_effects
+
+    registered_effects = get_registered_effects()
+    assert "inventory" in registered_effects, "inventory effect should be registered"
+
+
+def test_use_item_narration_hint_structure(demo_state):
+    """Test that use_item narration hints have proper structure."""
+    # First, reduce PC's HP so healing can have an effect
+    from router.game_state import HP
+
+    damaged_hp = HP(current=15, max=20)  # Reduce from full HP
+    demo_state.entities["pc.arin"] = demo_state.entities["pc.arin"].model_copy(
+        update={"hp": damaged_hp}
+    )
+
+    utterance = Utterance(text="I drink my healing potion", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "use_item",
+        {"actor": "pc.arin", "item_id": "healing_potion"},
+        demo_state,
+        utterance,
+        seed=88888,
+    )
+
+    assert result.ok is True, f"use_item should succeed: {result.error_message}"
+
+    # Check narration hint structure
+    hint = result.narration_hint
+    assert "summary" in hint, "Should have summary"
+    assert "tone_tags" in hint, "Should have tone_tags"
+    assert "mentioned_entities" in hint, "Should have mentioned_entities"
+    assert "mentioned_items" in hint, "Should have mentioned_items"
+    assert "effects_summary" in hint, "Should have effects_summary"
+    assert "item" in hint, "Should have item details"
+
+    assert "item" in hint["tone_tags"], "Should have 'item' tone tag"
+    assert "healing_potion" in hint["mentioned_items"], "Should mention the item"
+    assert "pc.arin" in hint["mentioned_entities"], "Should mention the actor"
 
 
 def test_get_info_execution(demo_state):

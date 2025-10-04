@@ -100,9 +100,11 @@ class TalkArgs(ToolArgs):
 class UseItemArgs(ToolArgs):
     """Arguments for use_item tool."""
 
-    actor: str
-    item: str
-    target: Optional[str] = None
+    actor: str  # who is using the item
+    item_id: str  # inventory item id
+    target: Optional[str] = None  # optional target entity
+    method: Literal["consume", "activate", "equip", "read"] = "consume"
+    charges: Optional[int] = 1  # how many charges to use (default 1)
 
 
 class NarrateOnlyArgs(ToolArgs):
@@ -265,7 +267,9 @@ def use_item_precond(state, utterance) -> bool:
     if not state.current_actor:
         return False
 
-    current_actor = state.actors.get(state.current_actor)
+    current_actor = state.entities.get(
+        state.current_actor
+    )  # Use entities instead of actors
     if not current_actor:
         return False
 
@@ -434,19 +438,21 @@ def suggest_use_item_args(state, utterance) -> Dict[str, Any]:
 
     if state.current_actor:
         args["actor"] = state.current_actor
-        current_actor = state.actors.get(state.current_actor)
+        current_actor = state.entities.get(
+            state.current_actor
+        )  # Use entities instead of actors
 
         if (
             current_actor
             and hasattr(current_actor, "inventory")
             and current_actor.inventory
         ):
-            args["item"] = current_actor.inventory[0]
+            args["item_id"] = current_actor.inventory[0]
         else:
-            args["item"] = None
+            args["item_id"] = None
     else:
         args["actor"] = None
-        args["item"] = None
+        args["item_id"] = None
 
     return args
 

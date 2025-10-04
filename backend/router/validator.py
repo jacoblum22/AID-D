@@ -60,6 +60,60 @@ class Validator:
     def __init__(self):
         self.turn_counter = 0
         self.social_outcomes = self._load_social_outcomes()
+        self.item_registry = self._load_item_registry()
+
+    def _load_item_registry(self) -> Dict[str, Any]:
+        """Load item registry from JSON file with fallback to hardcoded items."""
+        try:
+            # Look for items.json in parent directory of backend
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(os.path.dirname(current_dir))
+            items_path = os.path.join(parent_dir, "items.json")
+
+            with open(items_path, "r") as f:
+                registry = json.load(f)
+                logger.info(f"Loaded {len(registry)} items from items.json")
+                return registry
+        except FileNotFoundError:
+            logger.warning(
+                "items.json not found, using fallback hardcoded item registry"
+            )
+            return self._get_fallback_item_registry()
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing items.json: {e}")
+            return self._get_fallback_item_registry()
+
+    def _get_fallback_item_registry(self) -> Dict[str, Any]:
+        """Fallback hardcoded item registry if JSON file not available."""
+        return {
+            "healing_potion": {
+                "id": "healing_potion",
+                "name": "Healing Potion",
+                "description": "Restores health when drunk.",
+                "tags": ["consumable", "healing", "magical"],
+                "usage_methods": ["consume"],
+                "charges": 1,
+                "effects": [{"type": "hp", "delta": "2d4+2"}],
+            },
+            "poison_vial": {
+                "id": "poison_vial",
+                "name": "Poison Vial",
+                "description": "Deals poison damage to target.",
+                "tags": ["consumable", "poison", "dangerous"],
+                "usage_methods": ["consume"],
+                "charges": 1,
+                "effects": [{"type": "hp", "delta": "-1d6"}],
+            },
+            "rope": {
+                "id": "rope",
+                "name": "Rope",
+                "description": "Provides advantage on climbing checks.",
+                "tags": ["consumable", "mundane", "tool"],
+                "usage_methods": ["consume"],
+                "charges": 1,
+                "effects": [{"type": "mark", "tag": "climbing_advantage"}],
+            },
+        }
 
     def _load_social_outcomes(self) -> Dict[str, Any]:
         """Load social outcomes configuration from JSON file."""
@@ -826,6 +880,9 @@ class Validator:
         to_zone = args.get("to")
         method = args.get("method", "walk")
         cost = args.get("cost")
+        ignore_adjacency = args.get(
+            "ignore_adjacency", False
+        )  # For special movement tools
 
         # Validation: Actor exists and can act
         if not actor or actor not in state.entities:
@@ -911,8 +968,8 @@ class Validator:
                 narration_hint={},
             )
 
-        # Validation: Target zone is adjacent
-        if to_zone not in current_zone.adjacent_zones:
+        # Validation: Target zone is adjacent (unless ignore_adjacency is true)
+        if not ignore_adjacency and to_zone not in current_zone.adjacent_zones:
             valid_exits = [
                 state.zones[zone_id].name
                 for zone_id in current_zone.adjacent_zones
@@ -1573,6 +1630,7 @@ class Validator:
         weapon = args.get("weapon", "basic_melee")
         damage_expr = args.get("damage_expr", "1d6")
         consume_mark = args.get("consume_mark", True)
+        attack_mode = args.get("attack_mode", "normal")  # New: scroll vs normal attacks
 
         # Validate entities exist
         if actor not in state.entities:
@@ -1699,6 +1757,11 @@ class Validator:
             outcome = "partial"
         else:
             outcome = "fail"
+
+        # Special handling for scroll attacks - they never completely fail
+        if attack_mode == "scroll" and outcome == "fail":
+            outcome = "partial"  # Scrolls always deal at least half damage
+            logger.debug(f"Scroll attack upgraded from fail to partial for {weapon}")
 
         # Calculate damage based on outcome
         damage = 0
@@ -1859,35 +1922,1303 @@ class Validator:
     def _execute_use_item(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute use_item tool."""
-        actor = args.get("actor")
-        item = args.get("item")
-        target = args.get("target", actor)
+        """Execute use_item tool - comprehensive item usage system."""
+        import random
 
-        # Simple item effects
-        effects = []
-        if item and "potion" in item.lower():
-            effects.append({"type": "hp", "target": target, "delta": 5})
-        elif item and "rope" in item.lower():
-            effects.append(
-                {"type": "mark", "target": actor, "style_bonus": 1, "consumes": True}
+        random.seed(seed)
+
+        # Extract arguments
+        actor = args.get("actor")
+        item_id = args.get("item_id")
+        target = args.get("target")
+        if target is None:
+            target = actor  # Default target is actor if not specified
+        method = args.get("method", "consume")
+        charges = args.get("charges", 1)
+
+        # Ensure target is never None for type safety
+        if target is None:
+            target = "unknown"
+
+        # Validate actor exists and can act
+        if not actor or actor not in state.entities:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": "Who should use the item? I don't see that character."
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' not found",
             )
 
-        narration_hint = {
-            "summary": f"Used {item}",
-            "item": {"id": item, "target": target},
-            "tone_tags": ["resourceful"],
-            "salient_entities": [actor],
+        actor_entity = state.entities[actor]
+        if actor_entity.type not in ("pc", "npc"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": "Only characters can use items."},
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to non-character actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' is not a character",
+            )
+
+        # Type cast for safe access to actor attributes
+        actor_creature = cast(Union[PC, NPC], actor_entity)
+
+        # Check if actor can act (has positive HP)
+        if actor_creature.hp.current <= 0:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"{actor_creature.name} is unconscious and cannot use items."
+                },
+                facts={
+                    "cause": "actor_state",
+                    "actor_state": "unconscious",
+                    "actor": actor,
+                },
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to unconscious actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' is unconscious",
+            )
+
+        # Check if actor has inventory
+        if not hasattr(actor_creature, "inventory"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": f"{actor_creature.name} doesn't have an inventory."},
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing inventory",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' has no inventory",
+            )
+
+        # Check if actor has the item
+        if item_id not in actor_creature.inventory:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"You don't have '{item_id}'. What item would you like to use?"
+                },
+                facts={
+                    "cause": "item_not_found",
+                    "item_id": item_id,
+                    "available_items": actor_creature.inventory,
+                },
+                effects=[],
+                narration_hint={
+                    "summary": f"Asked for clarification due to missing item '{item_id}'",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [actor],
+                },
+                error_message=f"Item '{item_id}' not in inventory",
+            )
+
+        # Get item definition from registry (needed for validation)
+        item_definition = self._get_item_definition(item_id)
+
+        # Validate target if specified and different from actor
+        target_entity = None
+        if target and target != actor:
+            # Check if this item delegates to move tool (needs zone, not entity)
+            delegation_tool = item_definition.get("delegation", {}).get("tool")
+
+            if delegation_tool == "move":
+                # For move tool delegation, validate that target is a zone instead
+                if target not in state.zones:
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_clarifying",
+                        args={
+                            "question": f"I can't find the zone '{target}'. Where do you want to go?"
+                        },
+                        facts={},
+                        effects=[],
+                        narration_hint={
+                            "summary": "Asked for clarification due to missing zone",
+                            "tone_tags": ["helpful"],
+                            "salient_entities": [],
+                        },
+                        error_message=f"Zone '{target}' not found",
+                    )
+                # Skip entity validation for move delegation
+            else:
+                # Standard entity validation for other tools
+                if target not in state.entities:
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_clarifying",
+                        args={
+                            "question": f"I can't find '{target}'. Who should be the target?"
+                        },
+                        facts={},
+                        effects=[],
+                        narration_hint={
+                            "summary": "Asked for clarification due to missing target",
+                            "tone_tags": ["helpful"],
+                            "salient_entities": [],
+                        },
+                        error_message=f"Target '{target}' not found",
+                    )
+
+                target_entity = state.entities[target]
+
+        # Enhanced target validation with item-specific checks (only for entity targets)
+        if target_entity:
+            item_tags = item_definition.get("tags", [])
+
+            # Check if target is valid for the item type
+            if method in ("consume", "activate") and target_entity.type not in (
+                "pc",
+                "npc",
+            ):
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": "You can't use that item on this target. Choose a different target."
+                    },
+                    facts={},
+                    effects=[],
+                    narration_hint={
+                        "summary": "Asked for clarification due to invalid target type",
+                        "tone_tags": ["helpful"],
+                        "salient_entities": [],
+                    },
+                    error_message=f"Target '{target}' is not a valid target for item usage",
+                )
+
+            # Check for dangerous item usage on allies
+            if "dangerous" in item_tags or "poison" in item_tags:
+                # Warn if using dangerous items on potential allies
+                if target_entity.type == "pc":
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_clarifying",
+                        args={
+                            "question": f"This item could harm {target_entity.name}. Are you sure you want to use it on them?",
+                            "options": [
+                                {
+                                    "id": "A",
+                                    "label": "Yes, use it anyway",
+                                    "tool_id": "use_item",
+                                    "args_patch": args,  # Pass through original args
+                                },
+                                {
+                                    "id": "B",
+                                    "label": "No, cancel",
+                                    "tool_id": "narrate_only",
+                                    "args_patch": {"topic": "hesitation"},
+                                },
+                            ],
+                        },
+                        facts={
+                            "dangerous_item_warning": True,
+                            "target_type": target_entity.type,
+                            "item_tags": item_tags,
+                        },
+                        effects=[],
+                        narration_hint={
+                            "summary": "Warning about dangerous item usage",
+                            "tone_tags": ["warning", "dangerous"],
+                            "salient_entities": [actor, target],
+                        },
+                        error_message=f"Dangerous item usage warning for '{item_id}' on '{target}'",
+                    )
+
+            # Check visibility for targeted usage
+            if actor in state.entities and state.entities[actor].type in ("pc", "npc"):
+                actor_creature_check = cast(Union[PC, NPC], state.entities[actor])
+                if (
+                    hasattr(actor_creature_check, "visible_actors")
+                    and target not in actor_creature_check.visible_actors
+                ):
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_clarifying",
+                        args={
+                            "question": f"You can't see {target_entity.name} to use the item on them."
+                        },
+                        facts={},
+                        effects=[],
+                        narration_hint={
+                            "summary": "Asked for clarification due to invisible target",
+                            "tone_tags": ["helpful"],
+                            "salient_entities": [],
+                        },
+                        error_message=f"Target '{target}' is not visible to actor '{actor}'",
+                    )
+
+        # Validate method compatibility using tags and usage_methods
+        usage_methods = item_definition.get(
+            "usage_methods", [item_definition.get("method", "consume")]
+        )
+        if method not in usage_methods:
+            # Enhanced misuse detection with context-aware suggestions
+            item_tags = item_definition.get("tags", [])
+            suggestions = []
+            warnings = []
+
+            # Tag-based method suggestions
+            if "consumable" in item_tags:
+                suggestions.append("consume")
+            if "equipable" in item_tags or "weapon" in item_tags:
+                suggestions.append("equip")
+            if "reusable" in item_tags or "illumination" in item_tags:
+                suggestions.append("activate")
+            if "magical" in item_tags and "scroll" in item_tags:
+                suggestions.append("read")
+
+            # Generate warnings for dangerous misuse
+            if "cursed" in item_tags and method == "equip":
+                warnings.append(
+                    "Warning: This item is cursed and may have negative effects when equipped!"
+                )
+            if "dangerous" in item_tags and target and target != actor:
+                warnings.append("Warning: This item could harm the target!")
+            if "area_effect" in item_definition and not target:
+                warnings.append(
+                    "Warning: This item affects a large area - specify a target!"
+                )
+
+            suggested_methods = (
+                ", ".join(suggestions) if suggestions else ", ".join(usage_methods)
+            )
+
+            warning_text = " ".join(warnings) if warnings else ""
+            question_text = f"This item should be used with method '{suggested_methods}', not '{method}'. Try again?"
+            if warning_text:
+                question_text = f"{warning_text} {question_text}"
+
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": question_text},
+                facts={
+                    "cause": "method_mismatch",
+                    "expected_methods": usage_methods,
+                    "provided_method": method,
+                    "item_tags": item_tags,
+                    "warnings": warnings,
+                    "misuse_detected": True,
+                },
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to method mismatch",
+                    "tone_tags": ["helpful", "warning"] if warnings else ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Method mismatch: expected {usage_methods}, got '{method}'",
+            )
+
+        # Check if item has enough charges
+        item_charges = item_definition.get("charges", 1)
+        # Handle unlimited use items (-1 charges)
+        if item_charges != -1 and charges > item_charges:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"This item only has {item_charges} charges, but you're trying to use {charges}. Use fewer charges?"
+                },
+                facts={
+                    "cause": "insufficient_charges",
+                    "available_charges": item_charges,
+                    "requested_charges": charges,
+                },
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to insufficient charges",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Insufficient charges: has {item_charges}, requested {charges}",
+            )
+
+        # Execute item usage based on method
+        effects = []
+
+        # Capture inventory state before usage for enhanced logging
+        inventory_before = actor_creature.inventory.copy()
+
+        facts = {
+            "item_id": item_id,
+            "item_name": item_definition.get("name", item_id),
+            "method": method,
+            "charges_used": charges,
+            "target": target,
+            "item_tags": item_definition.get("tags", []),
+            "inventory_before": inventory_before,
         }
+
+        # Enhanced logging for replay - capture more granular details
+        dice_rolls_log = []
+        item_usage_metadata = {
+            "item_id": item_id,
+            "method": method,
+            "charges_used": charges,
+            "target": target,
+            "seed": seed,
+            "timestamp": int(time.time()),
+            "dice_rolls": dice_rolls_log,  # Will be populated during effect resolution
+        }
+
+        # Check for delegation first
+        delegation_result = None
+        if "delegation" in item_definition:
+            logger.debug(
+                f"Executing delegation for item {item_id} to {item_definition['delegation'].get('tool')}"
+            )
+            delegation_result = self._execute_item_delegation(
+                item_definition, target, actor, state, utterance, seed
+            )
+
+            # Check if delegation failed - surface the error instead of continuing
+            if delegation_result and not delegation_result.ok:
+                return delegation_result  # Return the delegated tool's error directly
+
+            if delegation_result and delegation_result.ok:
+                # Add delegation results to effects
+                effects.extend(delegation_result.effects)
+                facts.update(delegation_result.facts)
+                # Update metadata
+                item_usage_metadata["delegation"] = {
+                    "tool": item_definition["delegation"]["tool"],
+                    "delegated_result": delegation_result.to_dict(),
+                }
+
+        if method == "consume":
+            # Apply item effects (if not delegated successfully) and remove from inventory
+            if not (delegation_result and delegation_result.ok):
+                item_effects = self._resolve_item_effects_with_logging(
+                    item_definition, target, actor, random, dice_rolls_log
+                )
+                effects.extend(item_effects)
+
+            # Remove item from inventory
+            effects.append(
+                {
+                    "type": "inventory",
+                    "target": actor,
+                    "item": item_id,
+                    "delta": -1,
+                    "source": actor,
+                    "cause": "item_consumed",
+                }
+            )
+
+        elif method == "activate":
+            # Apply effects without consuming (if not delegated successfully)
+            if not (delegation_result and delegation_result.ok):
+                item_effects = self._resolve_item_effects_with_logging(
+                    item_definition, target, actor, random, dice_rolls_log
+                )
+                effects.extend(item_effects)
+
+            # Add activation tag to actor
+            effects.append(
+                {
+                    "type": "tag",
+                    "target": actor,
+                    "add": {f"{item_id}_active": True},
+                    "source": actor,
+                    "cause": "item_activated",
+                }
+            )
+
+            # Activate method does NOT consume the item
+
+        elif method == "equip":
+            # Move item to equipped slot (simplified - would need equipment system)
+            effects.append(
+                {
+                    "type": "tag",
+                    "target": actor,
+                    "add": {f"equipped_{item_id}": True},
+                    "source": actor,
+                    "cause": "item_equipped",
+                }
+            )
+
+            # Apply passive effects from item (if not delegated successfully)
+            if not (delegation_result and delegation_result.ok):
+                item_effects = self._resolve_item_effects_with_logging(
+                    item_definition, actor, actor, random, dice_rolls_log
+                )
+                effects.extend(item_effects)
+
+            # Equipment is NOT consumed - it stays in inventory but is now equipped
+
+        elif method == "read":
+            # Apply standard item effects first (if not delegated successfully)
+            if not (delegation_result and delegation_result.ok):
+                item_effects = self._resolve_item_effects_with_logging(
+                    item_definition, target, actor, random, dice_rolls_log
+                )
+                effects.extend(item_effects)
+
+            # Remove item from inventory (scrolls are typically consumed when read)
+            effects.append(
+                {
+                    "type": "inventory",
+                    "target": actor,
+                    "item": item_id,
+                    "delta": -1,
+                    "source": actor,
+                    "cause": "item_read",
+                }
+            )
+
+            # Create knowledge or advance clocks based on item
+            if "knowledge" in item_definition:
+                # Add lore/knowledge to scene
+                effects.append(
+                    {
+                        "type": "tag",
+                        "target": "scene",
+                        "add": {"revealed_info": item_definition["knowledge"]},
+                        "source": actor,
+                        "cause": "item_read",
+                    }
+                )
+
+            if "clock_effect" in item_definition:
+                clock_effect = item_definition["clock_effect"]
+                effects.append(
+                    {
+                        "type": "clock",
+                        "id": clock_effect["id"],
+                        "delta": clock_effect["delta"],
+                        "max": clock_effect.get("max", 10),
+                        "source": actor,
+                        "cause": "item_read",
+                    }
+                )
+
+        # Store enhanced logging metadata
+        item_usage_metadata["effects_generated"] = len(effects)
+        item_usage_metadata["inventory_before"] = inventory_before
+
+        # Create detailed narration hint
+        item_name = item_definition.get("name", item_id)
+        actor_name = actor_creature.name
+        item_tags = item_definition.get("tags", [])
+        charges_remaining = (
+            item_definition.get("charges", 1) - charges
+            if item_definition.get("charges", 1) != -1
+            else -1
+        )
+
+        # Capture inventory state after usage for comparison - maintain working list
+        inventory_after = inventory_before.copy()  # Start with original inventory
+
+        for effect in effects:
+            if effect.get("type") == "inventory" and effect.get("target") == actor:
+                item = effect.get("item")
+                delta = effect.get("delta", 0)
+
+                if item and delta != 0:
+                    if delta < 0:
+                        # Remove specified number of items (not all copies)
+                        items_to_remove = abs(delta)
+                        while items_to_remove > 0 and item in inventory_after:
+                            inventory_after.remove(item)
+                            items_to_remove -= 1
+                    else:
+                        # Add items
+                        for _ in range(delta):
+                            inventory_after.append(item)
+
+        # Complete the enhanced logging metadata
+        item_usage_metadata["inventory_after"] = inventory_after
+        item_usage_metadata["charges_remaining"] = charges_remaining
+
+        # Update facts with post-usage information
+        facts.update(
+            {
+                "inventory_after": inventory_after,
+                "charges_remaining": charges_remaining,
+                "item_consumed": (
+                    item_id not in inventory_after
+                    if item_id in inventory_before
+                    else False
+                ),
+                "item_usage_metadata": item_usage_metadata,  # Enhanced logging
+            }
+        )
+
+        # Check for delegation result summary override
+        summary_override = None
+        if delegation_result and delegation_result.narration_hint:
+            summary_override = delegation_result.narration_hint.get("summary")
+
+        if summary_override:
+            summary = summary_override
+        elif target and target != actor:
+            target_entity = state.entities[target]
+            target_name = getattr(target_entity, "name", target)
+            if method == "consume":
+                summary = f"{actor_name} uses {item_name} on {target_name}"
+            else:
+                summary = f"{actor_name} {method}s {item_name} on {target_name}"
+        else:
+            if method == "consume":
+                summary = f"{actor_name} uses {item_name}"
+            else:
+                summary = f"{actor_name} {method}s {item_name}"
+
+        # Add effect summary to narration
+        effects_summary = []
+        for effect in effects:
+            if effect["type"] == "hp":
+                delta = effect["delta"]
+                if delta > 0:
+                    effects_summary.append(f"heals {delta} HP")
+                else:
+                    effects_summary.append(f"deals {abs(delta)} damage")
+            elif effect["type"] == "inventory":
+                if effect["delta"] < 0:
+                    effects_summary.append("item consumed")
+            elif effect["type"] == "guard":
+                effects_summary.append(f"guard becomes {effect['value']}")
+            elif effect["type"] == "mark":
+                tag = effect.get("tag", "bonus")
+                effects_summary.append(f"gains {tag} mark")
+            elif effect["type"] == "delegation":
+                effects_summary.append(f"triggers {effect['tool']} effect")
+
+        # Enhanced narration hint with rich metadata
+        narration_hint = {
+            "summary": summary,
+            "tone_tags": ["item", method]
+            + (
+                [
+                    tag
+                    for tag in item_tags
+                    if tag
+                    in ["magical", "cursed", "healing", "poison", "fire", "social"]
+                ]
+            ),
+            "mentioned_entities": [actor]
+            + ([target] if target and target != actor else []),
+            "mentioned_items": [item_id],
+            "effects_summary": effects_summary,
+            "sentences_max": 3 if delegation_result else 2,
+            "item": {
+                "id": item_id,
+                "name": item_name,
+                "method": method,
+                "target": target,
+                "tags": item_tags,
+                "charges_remaining": charges_remaining,
+                "consumed": (
+                    item_id not in inventory_after
+                    if item_id in inventory_before
+                    else False
+                ),
+                "delegation": delegation_result is not None,
+            },
+            "inventory": {
+                "before": inventory_before,
+                "after": inventory_after,
+                "changed": inventory_before != inventory_after,
+            },
+            "enhanced_logging": item_usage_metadata,  # For replay and debugging
+        }
+
+        # Override narration hint if delegation provided one
+        if delegation_result and delegation_result.narration_hint:
+            delegation_hint = delegation_result.narration_hint
+            # Merge delegation narration with item narration
+            narration_hint.update(
+                {
+                    "summary": delegation_hint.get("summary", summary),
+                    "tone_tags": list(
+                        set(
+                            narration_hint["tone_tags"]
+                            + delegation_hint.get("tone_tags", [])
+                        )
+                    ),
+                    "delegation_details": delegation_hint,
+                }
+            )
 
         return ToolResult(
             ok=True,
             tool_id="use_item",
             args=args,
-            facts={"item_used": item},
+            facts=facts,
             effects=effects,
             narration_hint=narration_hint,
         )
+
+    def _get_item_definition(self, item_id: str) -> Dict[str, Any]:
+        """Get item definition from registry or return default definition."""
+        # Try to get from loaded registry first
+        if item_id in self.item_registry:
+            return self.item_registry[item_id]
+
+        # Fallback to legacy hardcoded registry for backward compatibility
+        LEGACY_ITEM_REGISTRY = {
+            "healing_potion": {
+                "id": "healing_potion",
+                "name": "Healing Potion",
+                "method": "consume",
+                "effects": [{"type": "hp", "delta": "2d4+2"}],
+                "charges": 1,
+                "description": "Restores health when drunk.",
+            },
+            "poison_vial": {
+                "id": "poison_vial",
+                "name": "Poison Vial",
+                "method": "consume",
+                "effects": [{"type": "hp", "delta": "-1d6"}],
+                "charges": 1,
+                "description": "Deals poison damage to target.",
+            },
+            "lantern": {
+                "id": "lantern",
+                "name": "Lantern",
+                "method": "activate",
+                "effects": [
+                    {"type": "tag", "target": "scene", "add": {"lighting": "bright"}}
+                ],
+                "charges": 10,
+                "description": "Provides bright light when activated.",
+            },
+            "rope": {
+                "id": "rope",
+                "name": "Rope",
+                "method": "consume",
+                "effects": [{"type": "mark", "tag": "climbing_advantage"}],
+                "charges": 1,
+                "description": "Provides advantage on climbing checks.",
+            },
+            "scroll_fireball": {
+                "id": "scroll_fireball",
+                "name": "Scroll of Fireball",
+                "method": "read",
+                "effects": [{"type": "hp", "delta": "-3d6"}],
+                "charges": 1,
+                "description": "Unleashes a magical fireball when read.",
+            },
+            "sword": {
+                "id": "sword",
+                "name": "Sword",
+                "method": "equip",
+                "effects": [{"type": "guard", "delta": 1}],
+                "charges": -1,  # -1 means unlimited uses
+                "description": "A sharp blade for combat.",
+            },
+        }
+
+        if item_id in LEGACY_ITEM_REGISTRY:
+            return LEGACY_ITEM_REGISTRY[item_id]
+
+        # Final fallback for completely unknown items
+        return {
+            "id": item_id,
+            "name": item_id.replace("_", " ").title(),
+            "method": "consume",
+            "usage_methods": ["consume"],
+            "tags": ["unknown", "mundane"],
+            "effects": [],
+            "charges": 1,
+            "description": f"A {item_id.replace('_', ' ')}.",
+        }
+
+    def _resolve_item_effects(
+        self, item_definition: Dict[str, Any], target: str, source: str, random_module
+    ) -> List[Dict[str, Any]]:
+        """Resolve item effects, including dice rolling for damage/healing and delegation."""
+        effects = []
+
+        # Check for delegation first - if item delegates to another tool, handle that
+        if "delegation" in item_definition:
+            delegation_effects = self._handle_item_delegation(
+                item_definition, target, source, random_module
+            )
+            effects.extend(delegation_effects)
+        else:
+            # Handle standard item effects
+            for effect_template in item_definition.get("effects", []):
+                effect = effect_template.copy()
+
+                # Add standard fields - ensure target is never None
+                effect_target = effect.get("target")
+                if effect_target is None or effect_target == "":
+                    effect["target"] = target
+                else:
+                    effect["target"] = effect_target
+
+                effect["source"] = source
+                effect["cause"] = "item_effect"
+
+                # Handle dice expressions in deltas
+                if "delta" in effect and isinstance(effect["delta"], str):
+                    delta_expr = effect["delta"]
+                    if any(char in delta_expr for char in "d+-"):
+                        # Parse and roll dice expression
+                        rolled_value = self._roll_dice_expression(
+                            delta_expr, random_module
+                        )
+                        effect["delta"] = rolled_value
+
+                # Handle special effect types
+                if effect["type"] == "mark":
+                    # Ensure mark has proper structure
+                    if "tag" not in effect:
+                        effect["tag"] = "item_bonus"
+                    effect["value"] = effect.get("value", 1)
+                    effect["consumes"] = effect.get("consumes", True)
+
+                elif effect["type"] == "guard":
+                    # For guard effects, use value instead of delta for absolute setting
+                    if "delta" in effect and "value" not in effect:
+                        # Convert delta to absolute value (simplified)
+                        current_guard = (
+                            0  # Would need to get from target entity in real system
+                        )
+                        effect["value"] = max(0, current_guard + effect["delta"])
+                        del effect["delta"]
+                    elif "value" not in effect:
+                        effect["value"] = 1  # Default guard value
+
+                elif effect["type"] == "tag":
+                    # Ensure tag effects have proper structure
+                    if "add" not in effect and "remove" not in effect:
+                        effect["add"] = {"item_effect": True}
+
+                effects.append(effect)
+
+        # Handle cursed effects for cursed items
+        if (
+            "cursed" in item_definition.get("tags", [])
+            and "curse_effects" in item_definition
+        ):
+            curse_effects = self._resolve_curse_effects(
+                item_definition, target, source, random_module
+            )
+            effects.extend(curse_effects)
+
+        # Handle area effects for multi-target items
+        if "area_effect" in item_definition:
+            area_effects = self._resolve_area_effects(
+                item_definition, target, source, random_module, effects
+            )
+            effects.extend(area_effects)
+
+        return effects
+
+    def _resolve_item_effects_with_logging(
+        self,
+        item_definition: Dict[str, Any],
+        target: str,
+        source: str,
+        random_module,
+        dice_log: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Resolve item effects with enhanced dice roll logging for replay."""
+        effects = []
+
+        # Check for delegation first - if item delegates to another tool, handle that
+        if "delegation" in item_definition:
+            delegation_effects = self._handle_item_delegation(
+                item_definition, target, source, random_module
+            )
+            effects.extend(delegation_effects)
+        else:
+            # Handle standard item effects
+            for effect_template in item_definition.get("effects", []):
+                effect = effect_template.copy()
+
+                # Add standard fields - ensure target is never None
+                effect_target = effect.get("target")
+                if effect_target is None or effect_target == "":
+                    effect["target"] = target
+                else:
+                    effect["target"] = effect_target
+
+                effect["source"] = source
+                effect["cause"] = "item_effect"
+
+                # Handle dice expressions in deltas with detailed logging
+                if "delta" in effect and isinstance(effect["delta"], str):
+                    delta_expr = effect["delta"]
+                    if any(char in delta_expr for char in "d+-"):
+                        # Parse and roll dice expression with detailed logging
+                        rolled_value = self._roll_dice_expression_with_details(
+                            delta_expr, random_module, dice_log
+                        )
+                        effect["delta"] = rolled_value
+
+                # Handle special effect types
+                if effect["type"] == "mark":
+                    # Ensure mark has proper structure
+                    if "tag" not in effect:
+                        effect["tag"] = "item_bonus"
+                    effect["value"] = effect.get("value", 1)
+                    effect["consumes"] = effect.get("consumes", True)
+
+                elif effect["type"] == "guard":
+                    # For guard effects, use value instead of delta for absolute setting
+                    if "delta" in effect and "value" not in effect:
+                        # Convert delta to absolute value (simplified)
+                        current_guard = (
+                            0  # Would need to get from target entity in real system
+                        )
+                        effect["value"] = max(0, current_guard + effect["delta"])
+                        del effect["delta"]
+                    elif "value" not in effect:
+                        effect["value"] = 1  # Default guard value
+
+                elif effect["type"] == "tag":
+                    # Ensure tag effects have proper structure
+                    if "add" not in effect and "remove" not in effect:
+                        effect["add"] = {"item_effect": True}
+
+                effects.append(effect)
+
+        # Handle cursed effects for cursed items
+        if (
+            "cursed" in item_definition.get("tags", [])
+            and "curse_effects" in item_definition
+        ):
+            curse_effects = self._resolve_curse_effects(
+                item_definition, target, source, random_module
+            )
+            effects.extend(curse_effects)
+
+        # Handle area effects for multi-target items
+        if "area_effect" in item_definition:
+            area_effects = self._resolve_area_effects(
+                item_definition, target, source, random_module, effects
+            )
+            effects.extend(area_effects)
+
+        return effects
+
+    def _handle_item_delegation(
+        self, item_definition: Dict[str, Any], target: str, source: str, random_module
+    ) -> List[Dict[str, Any]]:
+        """Handle delegation to other tools for complex items like scroll_fireball."""
+        delegation_config = item_definition.get("delegation", {})
+        target_tool = delegation_config.get("tool")
+        args_override = delegation_config.get("args_override", {})
+        effect_duration = delegation_config.get("effect_duration")
+
+        if not target_tool:
+            logger.warning(
+                f"Item delegation missing target tool: {item_definition.get('id')}"
+            )
+            return []
+
+        # Get current state from the context - this is a bit tricky since we're inside use_item
+        # For now, we'll create a synthetic delegation effect that can be processed later
+        delegation_effect = {
+            "type": "delegation",
+            "target": target,
+            "source": source,
+            "cause": "item_delegation",
+            "tool": target_tool,
+            "args_override": args_override,
+            "item_id": item_definition.get("id"),
+            "item_name": item_definition.get("name"),
+        }
+
+        if effect_duration:
+            delegation_effect["effect_duration"] = effect_duration
+
+        # For items like scroll_fireball that delegate to attack, we need special handling
+        if target_tool == "attack":
+            delegation_effect["delegation_type"] = "combat"
+            # Add area effect info if present
+            if "area_effect" in item_definition:
+                delegation_effect["area_effect"] = item_definition["area_effect"]
+
+        elif target_tool == "talk":
+            delegation_effect["delegation_type"] = "social"
+            # For social delegation like potion_persuasion
+
+        elif target_tool == "move":
+            delegation_effect["delegation_type"] = "movement"
+            # For movement delegation like grappling_hook
+
+        return [delegation_effect]
+
+    def _resolve_curse_effects(
+        self, item_definition: Dict[str, Any], target: str, source: str, random_module
+    ) -> List[Dict[str, Any]]:
+        """Resolve curse effects for cursed items like cursed_ring."""
+        curse_effects = []
+
+        for effect_template in item_definition.get("curse_effects", []):
+            effect = effect_template.copy()
+
+            # Add standard fields
+            effect["target"] = target
+            effect["source"] = source
+            effect["cause"] = "curse_effect"
+
+            # Handle dice expressions in deltas (simplified version for curse effects)
+            if "delta" in effect and isinstance(effect["delta"], str):
+                delta_expr = effect["delta"]
+                if any(char in delta_expr for char in "d+-"):
+                    rolled_value = self._roll_dice_expression(delta_expr, random_module)
+                    effect["delta"] = rolled_value
+
+            # Mark as a curse effect for special handling
+            effect["is_curse"] = True
+
+            curse_effects.append(effect)
+
+        return curse_effects
+
+    def _resolve_area_effects(
+        self,
+        item_definition: Dict[str, Any],
+        target: str,
+        source: str,
+        random_module,
+        base_effects: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Resolve area effects for items that affect multiple targets."""
+        area_config = item_definition.get("area_effect", {})
+        area_type = area_config.get("type", "zone")
+        radius = area_config.get("radius", 1)
+
+        area_effects = []
+
+        if area_type == "zone":
+            # Apply effects to all entities in the same zone as target
+            # For now, create a special area effect that will be processed by the effects system
+            area_effect = {
+                "type": "area_effect",
+                "target": target,
+                "source": source,
+                "cause": "item_area_effect",
+                "area_type": area_type,
+                "radius": radius,
+                "base_effects": base_effects,  # Effects to apply to each target
+                "item_id": item_definition.get("id"),
+            }
+            area_effects.append(area_effect)
+
+        return area_effects
+
+    def _execute_item_delegation(
+        self,
+        item_definition: Dict[str, Any],
+        target: str,
+        source: str,
+        state: GameState,
+        utterance: Utterance,
+        seed: int,
+    ) -> Optional[ToolResult]:
+        """Execute delegation to another tool for complex items."""
+        delegation_config = item_definition.get("delegation", {})
+        target_tool = delegation_config.get("tool")
+        args_override = delegation_config.get("args_override", {})
+        effect_duration = delegation_config.get("effect_duration")
+
+        if not target_tool:
+            logger.warning(
+                f"Item delegation missing target tool: {item_definition.get('id')}"
+            )
+            return None
+
+        # Build arguments for the delegated tool
+        delegated_args = {}
+
+        # Get base arguments from the tool's suggest_args
+        from .tool_catalog import get_tool_by_id
+
+        tool = get_tool_by_id(target_tool)
+        if tool and tool.suggest_args:
+            try:
+                delegated_args = tool.suggest_args(state, utterance)
+            except Exception as e:
+                logger.warning(
+                    f"Error getting base args for delegated tool {target_tool}: {e}"
+                )
+
+        # Override with delegation-specific arguments
+        delegated_args.update(args_override)
+
+        # Ensure actor and target are set correctly
+        delegated_args["actor"] = source
+        if target and target != source:
+            # Parameter mapping for different tools
+            if target_tool == "move":
+                # Move tool expects "to" parameter, not "target"
+                delegated_args["to"] = target
+            else:
+                # Other tools expect "target" parameter
+                delegated_args["target"] = target
+
+        # Add item context for narration
+        delegated_args["_item_context"] = {
+            "item_id": item_definition.get("id"),
+            "item_name": item_definition.get("name"),
+            "method": "delegation",
+        }
+
+        # Execute the delegated tool
+        try:
+            result = self._execute_tool(
+                target_tool, delegated_args, state, utterance, seed
+            )
+            logger.debug(
+                f"Delegation to {target_tool} completed with {len(result.effects)} effects"
+            )
+
+            # Enhance narration to mention the item
+            if result.ok and result.narration_hint:
+                item_name = item_definition.get("name", item_definition.get("id"))
+                original_summary = result.narration_hint.get("summary", "")
+
+                # Modify summary to include item usage
+                if target_tool == "attack":
+                    result.narration_hint["summary"] = (
+                        f"Using {item_name}, {original_summary.lower()}"
+                    )
+                elif target_tool == "talk":
+                    result.narration_hint["summary"] = (
+                        f"Enhanced by {item_name}, {original_summary.lower()}"
+                    )
+                elif target_tool == "move":
+                    result.narration_hint["summary"] = (
+                        f"Using {item_name}, {original_summary.lower()}"
+                    )
+
+                # Add item tags to tone_tags
+                item_tags = item_definition.get("tags", [])
+                tone_tags = result.narration_hint.get("tone_tags", [])
+                tone_tags.extend(
+                    [
+                        tag
+                        for tag in item_tags
+                        if tag in ["magical", "fire", "social", "traversal"]
+                    ]
+                )
+                result.narration_hint["tone_tags"] = tone_tags
+
+                # Add item to mentioned items
+                result.narration_hint["mentioned_items"] = [item_definition.get("id")]
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error executing delegated tool {target_tool}: {e}")
+            return None
+
+    def _roll_dice_expression(self, expr: str, random_module) -> int:
+        """Roll a dice expression like '2d4+2' or '-1d6' with enhanced logging."""
+        try:
+            # Handle negative expressions
+            negative = expr.startswith("-")
+            if negative:
+                expr = expr[1:]
+
+            # Split by + or -
+            total = 0
+            parts = []
+            current_part = ""
+
+            for char in expr:
+                if char in "+-":
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ""
+                    if char == "-":
+                        current_part = "-"
+                else:
+                    current_part += char
+
+            if current_part:
+                parts.append(current_part)
+
+            # Enhanced logging: capture individual rolls
+            roll_details = {
+                "expression": expr,
+                "negative": negative,
+                "parts": [],
+                "individual_rolls": [],
+                "total": 0,
+            }
+
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+
+                part_negative = part.startswith("-")
+                if part_negative:
+                    part = part[1:]
+
+                part_detail = {
+                    "part": part,
+                    "negative": part_negative,
+                    "type": "dice" if "d" in part else "constant",
+                    "rolls": [],
+                    "subtotal": 0,
+                }
+
+                if "d" in part:
+                    # Roll dice
+                    count_str, size_str = part.split("d", 1)
+                    count = int(count_str) if count_str else 1
+                    size = int(size_str)
+
+                    for _ in range(count):
+                        roll = random_module.randint(1, size)
+                        part_detail["rolls"].append(roll)
+                        roll_details["individual_rolls"].append(
+                            {"die_size": size, "result": roll}
+                        )
+                        part_subtotal = roll
+                        part_detail["subtotal"] += part_subtotal
+                        total += -part_subtotal if part_negative else part_subtotal
+                else:
+                    # Add constant
+                    constant = int(part)
+                    part_detail["subtotal"] = constant
+                    total += -constant if part_negative else constant
+
+                roll_details["parts"].append(part_detail)
+
+            final_total = -total if negative else total
+            roll_details["total"] = final_total
+
+            # Store roll details for enhanced logging (would need to be captured by caller)
+            # For now, just return the total but this structure enables detailed replay
+            return final_total
+
+        except (ValueError, IndexError):
+            # Fallback to simple value
+            return -1 if negative else 1
+
+    def _roll_dice_expression_with_details(
+        self, expr: str, random_module, dice_log: List[Dict[str, Any]]
+    ) -> int:
+        """Roll dice expression and capture detailed results for replay."""
+        try:
+            # Handle negative expressions
+            negative = expr.startswith("-")
+            if negative:
+                expr = expr[1:]
+
+            # Split by + or -
+            total = 0
+            parts = []
+            current_part = ""
+
+            for char in expr:
+                if char in "+-":
+                    if current_part:
+                        parts.append(current_part)
+                        current_part = ""
+                    if char == "-":
+                        current_part = "-"
+                else:
+                    current_part += char
+
+            if current_part:
+                parts.append(current_part)
+
+            # Enhanced logging: capture individual rolls
+            roll_entry = {
+                "expression": f"{'-' if negative else ''}{expr}",
+                "timestamp": int(time.time() * 1000),
+                "parts": [],
+                "individual_rolls": [],
+                "total": 0,
+            }
+
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+
+                part_negative = part.startswith("-")
+                if part_negative:
+                    part = part[1:]
+
+                part_detail = {
+                    "part": f"{'-' if part_negative else ''}{part}",
+                    "type": "dice" if "d" in part else "constant",
+                    "rolls": [],
+                    "subtotal": 0,
+                }
+
+                if "d" in part:
+                    # Roll dice with detailed logging
+                    count_str, size_str = part.split("d", 1)
+                    count = int(count_str) if count_str else 1
+                    size = int(size_str)
+
+                    for _ in range(count):
+                        roll = random_module.randint(1, size)
+                        part_detail["rolls"].append(roll)
+                        roll_entry["individual_rolls"].append(
+                            {
+                                "die_size": size,
+                                "result": roll,
+                                "part_index": len(roll_entry["parts"]),
+                            }
+                        )
+                        part_subtotal = roll
+                        part_detail["subtotal"] += part_subtotal
+                        total += -part_subtotal if part_negative else part_subtotal
+                else:
+                    # Add constant
+                    constant = int(part)
+                    part_detail["subtotal"] = constant
+                    total += -constant if part_negative else constant
+
+                roll_entry["parts"].append(part_detail)
+
+            final_total = -total if negative else total
+            roll_entry["total"] = final_total
+
+            # Add to dice log for replay
+            dice_log.append(roll_entry)
+
+            return final_total
+
+        except (ValueError, IndexError):
+            # Fallback to simple value with logging
+            fallback_entry = {
+                "expression": expr,
+                "timestamp": int(time.time() * 1000),
+                "fallback": True,
+                "total": -1 if negative else 1,
+            }
+            dice_log.append(fallback_entry)
+            return -1 if negative else 1
 
     def _execute_get_info(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
