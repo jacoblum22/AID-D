@@ -18,9 +18,8 @@ sys.path.insert(
     0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
 )
 
-from router.game_state import GameState, PC, NPC, Zone, HP, Utterance, Entity
+from router.game_state import GameState, PC, NPC, Zone, HP, Utterance
 from router.validator import validate_and_execute
-from typing import Dict
 
 
 @pytest.fixture
@@ -315,6 +314,7 @@ class TestDelegationSystem:
         args = {
             "actor": "pc.arin",
             "item_id": "grappling_hook",
+            "target": "threshold",  # Specify where to go
             "method": "activate",
         }
 
@@ -355,7 +355,9 @@ class TestCursedItemsAndFailureModes:
         assert result.ok
 
         # Should have both positive and negative effects
-        hp_effects = [e for e in result.effects if e["type"] == "hp"]
+        _hp_effects = [
+            e for e in result.effects if e["type"] == "hp"
+        ]  # May be used in future assertions
 
         # Check for curse effects
         curse_effects = [e for e in result.effects if e.get("is_curse", False)]
@@ -595,7 +597,7 @@ class TestEnhancedLogging:
         # Check item-specific metadata
         item_meta = hint["item"]
         assert item_meta["id"] == "healing_potion"
-        assert item_meta["consumed"] == True
+        assert item_meta["consumed"] is True
         assert "charges_remaining" in item_meta
 
 
@@ -674,7 +676,12 @@ class TestSystemIntegration:
         hp_effects = [e for e in result.effects if e["type"] == "hp"]
         assert len(hp_effects) == 1
         assert hp_effects[0]["target"] == "pc.arin"
-        assert hp_effects[0]["delta"] > 0
+        healing_delta = hp_effects[0]["delta"]
+        assert healing_delta > 0
+
+        # Verify the healing amount makes sense relative to initial HP
+        assert healing_delta > 0, f"Expected positive healing, got {healing_delta}"
+        assert initial_hp + healing_delta <= 20, f"Healing would exceed max HP"
 
     def test_marks_and_guards_interaction(self, use_item_state):
         """Test item effects interact properly with marks and guards."""

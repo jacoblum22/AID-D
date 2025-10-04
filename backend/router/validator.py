@@ -2295,7 +2295,12 @@ class Validator:
             delegation_result = self._execute_item_delegation(
                 item_definition, target, actor, state, utterance, seed
             )
-            if delegation_result:
+
+            # Check if delegation failed - surface the error instead of continuing
+            if delegation_result and not delegation_result.ok:
+                return delegation_result  # Return the delegated tool's error directly
+
+            if delegation_result and delegation_result.ok:
                 # Add delegation results to effects
                 effects.extend(delegation_result.effects)
                 facts.update(delegation_result.facts)
@@ -2306,8 +2311,8 @@ class Validator:
                 }
 
         if method == "consume":
-            # Apply item effects (if not delegated) and remove from inventory
-            if not delegation_result:
+            # Apply item effects (if not delegated successfully) and remove from inventory
+            if not (delegation_result and delegation_result.ok):
                 item_effects = self._resolve_item_effects_with_logging(
                     item_definition, target, actor, random, dice_rolls_log
                 )
@@ -2326,8 +2331,8 @@ class Validator:
             )
 
         elif method == "activate":
-            # Apply effects without consuming (if not delegated)
-            if not delegation_result:
+            # Apply effects without consuming (if not delegated successfully)
+            if not (delegation_result and delegation_result.ok):
                 item_effects = self._resolve_item_effects_with_logging(
                     item_definition, target, actor, random, dice_rolls_log
                 )
@@ -2358,8 +2363,8 @@ class Validator:
                 }
             )
 
-            # Apply passive effects from item (if not delegated)
-            if not delegation_result:
+            # Apply passive effects from item (if not delegated successfully)
+            if not (delegation_result and delegation_result.ok):
                 item_effects = self._resolve_item_effects_with_logging(
                     item_definition, actor, actor, random, dice_rolls_log
                 )
@@ -2368,8 +2373,8 @@ class Validator:
             # Equipment is NOT consumed - it stays in inventory but is now equipped
 
         elif method == "read":
-            # Apply standard item effects first (if not delegated)
-            if not delegation_result:
+            # Apply standard item effects first (if not delegated successfully)
+            if not (delegation_result and delegation_result.ok):
                 item_effects = self._resolve_item_effects_with_logging(
                     item_definition, target, actor, random, dice_rolls_log
                 )
@@ -2427,19 +2432,25 @@ class Validator:
             else -1
         )
 
-        # Capture inventory state after usage for comparison
-        inventory_after = []
+        # Capture inventory state after usage for comparison - maintain working list
+        inventory_after = inventory_before.copy()  # Start with original inventory
+
         for effect in effects:
             if effect.get("type") == "inventory" and effect.get("target") == actor:
-                # Simulate inventory change
-                if effect.get("delta", 0) < 0 and effect.get("item") == item_id:
-                    inventory_after = [
-                        item for item in inventory_before if item != item_id
-                    ]
-                else:
-                    inventory_after = inventory_before.copy()
-            else:
-                inventory_after = inventory_before.copy()
+                item = effect.get("item")
+                delta = effect.get("delta", 0)
+
+                if item and delta != 0:
+                    if delta < 0:
+                        # Remove specified number of items (not all copies)
+                        items_to_remove = abs(delta)
+                        while items_to_remove > 0 and item in inventory_after:
+                            inventory_after.remove(item)
+                            items_to_remove -= 1
+                    else:
+                        # Add items
+                        for _ in range(delta):
+                            inventory_after.append(item)
 
         # Complete the enhanced logging metadata
         item_usage_metadata["inventory_after"] = inventory_after
