@@ -19,6 +19,75 @@ class Meta(BaseModel):
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 
+class EffectLogEntry(BaseModel):
+    """
+    Structured log entry for applied effects with comprehensive audit trail.
+
+    Used for replay, undo functionality, and debugging. Contains complete
+    information about an effect application including before/after state,
+    dice rolls, and execution details.
+    """
+
+    # Core effect information
+    effect: Dict[str, Any]  # The applied effect (Effect.model_dump())
+    before: Dict[str, Any] = Field(default_factory=dict)  # State before application
+    after: Dict[str, Any] = Field(default_factory=dict)  # State after application
+
+    # Execution results
+    ok: bool = True  # Whether the effect succeeded
+    error: Optional[str] = None  # Error message if failed
+
+    # Context and replay information
+    actor: Optional[str] = None  # Who caused this effect
+    seed: Optional[int] = None  # For deterministic replay
+    rolled: Optional[List[int]] = None  # Raw dice roll results
+    dice_log: Optional[List[Dict[str, Any]]] = None  # Detailed dice information
+
+    # Impact analysis
+    impact_level: Optional[int] = None  # Magnitude of change (0-10+)
+    resolved_delta: Optional[Union[int, float]] = (
+        None  # Final delta value after dice resolution
+    )
+
+    # Timestamps and metadata
+    timestamp: Optional[str] = None  # When the effect was applied
+    round_applied: Optional[int] = None  # Game round when applied
+    meta: Dict[str, Any] = Field(default_factory=dict)  # Additional metadata
+
+
+class PendingEffect(BaseModel):
+    """
+    Timed or conditional effect waiting to be applied.
+
+    Represents an effect scheduled for future execution. Forms part of a FIFO queue
+    where effects are added via append() and processed in chronological order.
+
+    Queue Operations:
+    - Add: pending_effects.append(new_effect)
+    - Process: Iterate through list, apply triggered effects, rebuild list without them
+    - The list should maintain chronological order (earliest trigger_round first)
+    """
+
+    # The effect to apply when triggered
+    effect: Dict[str, Any]  # Effect.model_dump() - the effect to apply
+
+    # Timing information
+    trigger_round: int  # Game round when this effect should activate
+    scheduled_at: int  # Game round when this was scheduled
+
+    # Context information
+    actor: Optional[str] = None  # Who scheduled this effect
+    seed: Optional[int] = None  # For deterministic replay
+
+    # Unique identifier
+    id: str  # Unique identifier for this pending effect
+
+    # Optional metadata
+    condition: Optional[str] = None  # Additional condition to check before applying
+    source: Optional[str] = None  # What caused this effect to be scheduled
+    meta: Dict[str, Any] = Field(default_factory=dict)  # Additional metadata
+
+
 class Zone(BaseModel):
     """Represents a game zone/location."""
 
@@ -149,7 +218,64 @@ class Scene(BaseModel):
     objective: Dict[str, Any] = Field(default_factory=dict)
     pending_choice: Optional[Dict[str, Any]] = None  # For ask_clarifying tool
     choice_count_this_turn: int = 0  # Max 3 clarifications per turn
+    last_effect_log: List[EffectLogEntry] = Field(
+        default_factory=list,
+        description="Structured log of recently applied effects for replay/undo functionality. "
+        "Contains complete audit trail with before/after state, dice rolls, and execution details.",
+    )
+    last_diff_summary: Optional[str] = (
+        None  # Human-readable audit trail of last changes
+    )
+    pending_effects: List[PendingEffect] = Field(
+        default_factory=list,
+        description="FIFO queue of timed/conditional effects awaiting execution. "
+        "Effects are appended to the end and processed in chronological order. "
+        "Use .append() to add new effects and rebuild the list to remove triggered ones. "
+        "Maintains chronological ordering by trigger_round.",
+    )
     meta: Meta = Field(default_factory=Meta)
+
+    def add_pending_effect(self, pending_effect: PendingEffect) -> None:
+        """
+        Add a pending effect to the FIFO queue.
+
+        Effects are appended to the end to maintain chronological order.
+        The queue should be processed by trigger_round to ensure proper timing.
+        """
+        self.pending_effects.append(pending_effect)
+
+    def process_pending_effects(self, current_round: int) -> List[PendingEffect]:
+        """
+        Remove and return all pending effects that should trigger this round.
+
+        This maintains FIFO semantics by processing effects in the order they were added,
+        but only returns those whose trigger_round <= current_round.
+
+        Args:
+            current_round: The current game round
+
+        Returns:
+            List of effects to process (trigger_round <= current_round)
+        """
+        triggered = []
+        remaining = []
+
+        for effect in self.pending_effects:
+            if effect.trigger_round <= current_round:
+                triggered.append(effect)
+            else:
+                remaining.append(effect)
+
+        self.pending_effects = remaining
+        return triggered
+
+    def add_effect_log(self, log_entry: EffectLogEntry) -> None:
+        """
+        Add an effect log entry to the audit trail.
+
+        Maintains a record of all applied effects for replay/undo functionality.
+        """
+        self.last_effect_log.append(log_entry)
 
 
 class GameState(BaseModel):

@@ -16,7 +16,7 @@ import logging
 import os
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional, Union, cast
+from typing import Dict, Any, List, Optional, Union, cast, Callable
 from pydantic import BaseModel, ValidationError
 from dataclasses import dataclass
 
@@ -27,11 +27,13 @@ from .game_state import (
     NPC,
     ObjectEntity,
     ItemEntity,
+    PendingEffect,
+    EffectLogEntry,
     is_visible_to,
     is_zone_visible_to,
     is_clock_visible_to,
 )
-from .tool_catalog import TOOL_CATALOG, get_tool_by_id
+from .tool_catalog import TOOL_CATALOG, get_tool_by_id, Effect
 from .effects import apply_effects
 
 
@@ -4470,24 +4472,1743 @@ class Validator:
         else:
             return "over-shoulder"
 
+    # Effect Type Registry System
+    EFFECT_REGISTRY = {
+        "hp": "_apply_hp_effect",
+        "guard": "_apply_guard_effect",
+        "position": "_apply_position_effect",
+        "mark": "_apply_mark_effect",
+        "inventory": "_apply_inventory_effect",
+        "clock": "_apply_clock_effect",
+        "tag": "_apply_tag_effect",
+        "resource": "_apply_resource_effect",
+        "meta": "_apply_meta_effect",
+    }
+
+    # Reaction rules for cascading effects
+    REACTION_RULES = {
+        # HP-based reactions
+        "hp_zero": {
+            "trigger": {"type": "hp", "condition": "after.hp.current <= 0"},
+            "effects": [{"type": "tag", "add": "unconscious", "source": "hp_reaction"}],
+        },
+        "hp_critical": {
+            "trigger": {
+                "type": "hp",
+                "condition": "after.hp.current <= 3 and after.hp.current > 0 and before.hp.current > 3",
+            },
+            "effects": [{"type": "tag", "add": "bloodied", "source": "hp_reaction"}],
+        },
+        # Mark-based reactions
+        "fear_guard_penalty": {
+            "trigger": {"type": "mark", "condition": "effect.add == 'fear'"},
+            "effects": [{"type": "guard", "delta": -1, "source": "fear_reaction"}],
+        },
+        "confidence_guard_bonus": {
+            "trigger": {"type": "mark", "condition": "effect.add == 'confidence'"},
+            "effects": [{"type": "guard", "delta": 1, "source": "confidence_reaction"}],
+        },
+        # Position-based reactions
+        "zone_visibility_update": {
+            "trigger": {
+                "type": "position",
+                "condition": "True",
+            },  # Always trigger on position change
+            "effects": [],  # Handled specially - visibility updates are automatic
+        },
+    }
+
+    def _dispatch_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Dispatch effect to appropriate handler using registry."""
+        handler_name = self.EFFECT_REGISTRY.get(effect.type)
+        if handler_name is None:
+            # Unknown effect types are skipped gracefully for plugin extensibility
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={},
+                after={},
+                ok=True,  # Changed to True so unknown effects don't fail transactions
+                error=f"Unknown effect type: {effect.type} (skipped)",
+                actor=actor,
+                seed=seed,
+                state=state,
+            )
+
+        handler = getattr(self, handler_name, None)
+        if handler is None:
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={},
+                after={},
+                ok=False,
+                error=f"Handler {handler_name} not found for effect type: {effect.type}",
+                actor=actor,
+                seed=seed,
+                state=state,
+            )
+
+        return handler(effect, state, actor, seed)
+
+    def register_effect_handler(
+        self, effect_type: str, handler_method_name: str
+    ) -> None:
+        """Register a new effect type handler for plugin extensibility."""
+        self.EFFECT_REGISTRY[effect_type] = handler_method_name
+
+    def get_registered_effect_types(self) -> List[str]:
+        """Get list of all registered effect types."""
+        return list(self.EFFECT_REGISTRY.keys())
+
+    # Apply Effects Tool Helper Functions
+    def _create_enhanced_log_entry(
+        self,
+        effect: Effect,
+        before: Dict[str, Any],
+        after: Dict[str, Any],
+        ok: bool = True,
+        error: Optional[str] = None,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+        rolled: Optional[List[int]] = None,
+        state: Optional[GameState] = None,
+        dice_log: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Create enhanced log entry with all replay and audit fields."""
+        # Calculate impact level (magnitude of change) from actual results
+        impact_level = 0
+        resolved_delta = 0
+
+        # Try to get resolved delta from dice log or before/after values
+        if dice_log and len(dice_log) > 0:
+            # Use the resolved dice total
+            resolved_delta = dice_log[0].get("total", 0)
+            impact_level = abs(resolved_delta)
+        elif effect.delta is not None:
+            # Try to resolve delta - handle both numbers and dice expressions
+            try:
+                if isinstance(effect.delta, str) and any(
+                    char in str(effect.delta) for char in "d+-"
+                ):
+                    # Dice expression - estimate impact from before/after if available
+                    if "hp" in before and "hp" in after:
+                        resolved_delta = after["hp"] - before["hp"]
+                        impact_level = abs(resolved_delta)
+                    elif len(before) == 1 and len(after) == 1:
+                        # Single field change
+                        before_val = list(before.values())[0]
+                        after_val = list(after.values())[0]
+                        if isinstance(before_val, (int, float)) and isinstance(
+                            after_val, (int, float)
+                        ):
+                            resolved_delta = after_val - before_val
+                            impact_level = abs(resolved_delta)
+                else:
+                    # Regular number
+                    resolved_delta = int(effect.delta)
+                    impact_level = abs(resolved_delta)
+            except (ValueError, TypeError):
+                # Fallback for unparseable values
+                impact_level = 1
+        elif ok and effect.type in ("position", "mark", "tag"):
+            impact_level = 1  # Binary change
+
+        # Generate human-readable summary using resolved delta
+        summary = ""
+        if ok:
+            target_name = effect.target
+            if "." in target_name:
+                target_name = target_name.split(".")[-1].title()
+
+            if effect.type == "hp":
+                if resolved_delta > 0:
+                    summary = f"{target_name} healed {resolved_delta} HP"
+                elif resolved_delta < 0:
+                    summary = f"{target_name} took {abs(resolved_delta)} damage"
+                else:
+                    summary = f"{target_name} HP unchanged"
+            elif effect.type == "guard":
+                if resolved_delta > 0:
+                    summary = f"{target_name} gained {resolved_delta} guard"
+                elif resolved_delta < 0:
+                    summary = f"{target_name} lost {abs(resolved_delta)} guard"
+                else:
+                    summary = f"{target_name} guard unchanged"
+            elif effect.type == "position":
+                summary = f"{target_name} moved to {effect.to}"
+            elif effect.type == "mark":
+                if effect.add:
+                    summary = f"{target_name} gained {effect.add} mark"
+                elif effect.remove:
+                    summary = f"{target_name} lost {effect.remove} mark"
+            elif effect.type == "inventory":
+                item_name = effect.id or "item"
+                if resolved_delta > 0:
+                    summary = f"{target_name} gained {resolved_delta} {item_name}"
+                elif resolved_delta < 0:
+                    summary = f"{target_name} lost {abs(resolved_delta)} {item_name}"
+                else:
+                    summary = f"{target_name} {item_name} unchanged"
+            elif effect.type == "clock":
+                clock_name = effect.id or "clock"
+                if resolved_delta > 0:
+                    summary = f"{clock_name} advanced by {resolved_delta}"
+                elif resolved_delta < 0:
+                    summary = f"{clock_name} decreased by {abs(resolved_delta)}"
+                else:
+                    summary = f"{clock_name} unchanged"
+            elif effect.type == "tag":
+                if effect.add:
+                    summary = f"{target_name} gained {effect.add} tag"
+                elif effect.remove:
+                    summary = f"{target_name} lost {effect.remove} tag"
+            else:
+                summary = f"{target_name} {effect.type} changed"
+        else:
+            summary = (
+                f"Failed to apply {effect.type} effect: {error or 'unknown error'}"
+            )
+
+        return {
+            "effect": effect.model_dump(),
+            "before": before,
+            "after": after,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "ok": ok,
+            "error": error,
+            # Enhanced fields
+            "seed": seed,
+            "actor": actor or effect.source,
+            "round": state.scene.round if state else None,
+            "rolled": dice_log or rolled or [],
+            "summary": summary,
+            "impact_level": impact_level,
+        }
+
+    def _validate_effect(self, effect: Effect, state: GameState) -> Optional[str]:
+        """Validate a single effect. Returns error message if invalid, None if valid."""
+        # Check target exists - allow known non-entity targets and target-less effects
+        if effect.target is not None:
+            # Allow scene/global targets, entity targets, and special patterns for certain effect types
+            if (
+                effect.target not in state.entities
+                and effect.target not in ("scene", "global")
+                and effect.type != "meta"
+                and not (effect.type == "clock" and effect.target.startswith("clock."))
+            ):
+                return f"Entity {effect.target} not found"
+
+        # Type-specific validation
+        if effect.type == "hp":
+            if effect.target not in state.entities:
+                return f"HP effect target not found: {effect.target}"
+            entity = state.entities[effect.target]
+            if entity.type not in ("pc", "npc"):
+                return f"HP effect on non-creature: {entity.type}"
+            if effect.delta is None:
+                return "HP effect requires delta"
+
+        elif effect.type == "position":
+            if effect.to is None:
+                return "Position effect requires 'to' field"
+            if effect.to not in state.zones:
+                return f"Target zone {effect.to} not found"
+
+        elif effect.type == "clock":
+            if effect.id is None:
+                return "Clock effect requires 'id' field"
+            if effect.delta is None:
+                return "Clock effect requires delta"
+
+        elif effect.type == "inventory":
+            if effect.id is None:
+                return "Inventory effect requires 'id' field"
+            if effect.delta is None:
+                return "Inventory effect requires delta"
+
+        elif effect.type in ("mark", "tag"):
+            if effect.add is None and effect.remove is None:
+                return f"{effect.type} effect requires either 'add' or 'remove'"
+
+        elif effect.type == "guard":
+            if effect.delta is None:
+                return "Guard effect requires delta"
+
+        elif effect.type == "resource":
+            if effect.id is None:
+                return "Resource effect requires 'id' field"
+            if effect.delta is None:
+                return "Resource effect requires delta"
+
+        return None
+
+    def _create_snapshot(
+        self, state: GameState, effects: List[Effect]
+    ) -> Dict[str, Any]:
+        """Create a snapshot of state before applying effects for rollback."""
+        snapshot = {}
+
+        # Snapshot all entities that might be affected
+        for effect in effects:
+            if effect.target in state.entities:
+                entity = state.entities[effect.target]
+                snapshot[effect.target] = entity.model_copy(deep=True)
+
+        # Snapshot clocks if any clock effects
+        clock_effects = [e for e in effects if e.type == "clock"]
+        if clock_effects:
+            snapshot["clocks"] = {k: v.copy() for k, v in state.clocks.items()}
+
+        # Snapshot scene-level structures that can be mutated during effect application
+        scene_effects = [
+            e for e in effects if e.target == "scene" or e.type in ("tag", "timed")
+        ]
+        if scene_effects:
+            # Snapshot scene tags (can be mutated by tag effects)
+            if hasattr(state.scene, "tags"):
+                snapshot["scene_tags"] = state.scene.tags.copy()
+
+            # Snapshot pending effects (can be mutated by timed effects)
+            if hasattr(state.scene, "pending_effects"):
+                snapshot["scene_pending_effects"] = [
+                    (
+                        effect.model_copy()
+                        if hasattr(effect, "model_copy")
+                        else dict(effect)
+                    )
+                    for effect in state.scene.pending_effects
+                ]
+
+        return snapshot
+
+    def _apply_hp_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply HP effect and return enhanced log entry with dice expression support."""
+        import random
+
+        entity = state.entities[effect.target]
+        living_entity = cast(Union[PC, NPC], entity)
+
+        old_hp = living_entity.hp.current
+
+        # Handle dice expressions in delta field
+        dice_log = []
+        if effect.delta is not None:
+            if isinstance(effect.delta, str) and any(
+                char in str(effect.delta) for char in "d+-"
+            ):
+                # Delta contains dice expression - roll it
+                if seed is not None:
+                    random.seed(seed)
+                delta = self._roll_dice_expression_with_details(
+                    str(effect.delta), random, dice_log
+                )
+            else:
+                # Delta is already a number
+                delta = int(effect.delta)
+        else:
+            delta = 0
+
+        new_hp = max(0, min(living_entity.hp.max, old_hp + delta))
+
+        # Update entity
+        from .game_state import HP
+
+        updated_entity = living_entity.model_copy(
+            update={"hp": HP(current=new_hp, max=living_entity.hp.max)}
+        )
+        state.entities[effect.target] = updated_entity
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={"hp": old_hp},
+            after={"hp": new_hp},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+            dice_log=dice_log,  # Pass dice results for storage
+        )
+
+    def _apply_guard_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply guard effect and return enhanced log entry with dice expression support."""
+        import random
+
+        entity = state.entities[effect.target]
+        living_entity = cast(Union[PC, NPC], entity)
+
+        old_guard = getattr(living_entity, "guard", 0)
+
+        # Handle dice expressions in delta field
+        dice_log = []
+        if effect.delta is not None:
+            if isinstance(effect.delta, str) and any(
+                char in str(effect.delta) for char in "d+-"
+            ):
+                # Delta contains dice expression - roll it
+                if seed is not None:
+                    random.seed(seed)
+                delta = self._roll_dice_expression_with_details(
+                    str(effect.delta), random, dice_log
+                )
+            else:
+                # Delta is already a number
+                delta = int(effect.delta)
+        else:
+            delta = 0
+
+        new_guard = old_guard + delta
+
+        # Update entity
+        updated_entity = living_entity.model_copy(update={"guard": new_guard})
+        state.entities[effect.target] = updated_entity
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={"guard": old_guard},
+            after={"guard": new_guard},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+            dice_log=dice_log,
+        )
+
+    def _apply_position_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply position effect and return enhanced log entry."""
+        entity = state.entities[effect.target]
+        old_zone = entity.current_zone
+        new_zone = effect.to
+
+        # Update entity position
+        updated_entity = entity.model_copy(update={"current_zone": new_zone})
+        state.entities[effect.target] = updated_entity
+
+        # Update visibility for all actors
+        from .effects import _update_visibility
+
+        _update_visibility(state)
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={"zone": old_zone},
+            after={"zone": new_zone},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+        )
+
+    def _apply_mark_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply mark effect and return enhanced log entry."""
+        entity = state.entities[effect.target]
+        living_entity = cast(Union[PC, NPC], entity)
+
+        old_marks = getattr(living_entity, "marks", {}).copy()
+        new_marks = old_marks.copy()
+
+        if effect.add:
+            new_marks[effect.add] = {"source": effect.source or "unknown"}
+        if effect.remove and effect.remove in new_marks:
+            del new_marks[effect.remove]
+
+        updated_entity = living_entity.model_copy(update={"marks": new_marks})
+        state.entities[effect.target] = updated_entity
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={"marks": old_marks},
+            after={"marks": new_marks},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+        )
+
+    def _apply_inventory_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply inventory effect and return enhanced log entry with dice expression support."""
+        import random
+
+        entity = state.entities[effect.target]
+        living_entity = cast(Union[PC, NPC], entity)
+
+        old_inventory = living_entity.inventory.copy()
+        new_inventory = old_inventory.copy()
+
+        # Handle dice expressions in delta field
+        dice_log = []
+        if effect.delta is not None:
+            if isinstance(effect.delta, str) and any(
+                char in str(effect.delta) for char in "d+-"
+            ):
+                # Delta contains dice expression - roll it
+                if seed is not None:
+                    random.seed(seed)
+                delta = self._roll_dice_expression_with_details(
+                    str(effect.delta), random, dice_log
+                )
+            else:
+                # Delta is already a number
+                delta = int(effect.delta)
+        else:
+            delta = 0
+
+        item_id = effect.id
+
+        if item_id is None:
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={"inventory": old_inventory},
+                after={"inventory": old_inventory},
+                ok=False,
+                error="Item ID is required for inventory effect",
+                actor=actor,
+                seed=seed,
+                state=state,
+                dice_log=dice_log,
+            )
+
+        if delta > 0:
+            # Add items
+            for _ in range(delta):
+                new_inventory.append(item_id)
+        else:
+            # Remove items
+            items_to_remove = abs(delta)
+            for _ in range(items_to_remove):
+                if item_id in new_inventory:
+                    new_inventory.remove(item_id)
+                else:
+                    break
+
+        updated_entity = living_entity.model_copy(update={"inventory": new_inventory})
+        state.entities[effect.target] = updated_entity
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={"inventory": old_inventory},
+            after={"inventory": new_inventory},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+            dice_log=dice_log,
+        )
+
+    def _apply_clock_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply clock effect and return enhanced log entry."""
+        clock_id = effect.id
+        if clock_id is None:
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={},
+                after={},
+                ok=False,
+                error="Clock ID is required for clock effect",
+                actor=actor,
+                seed=seed,
+                state=state,
+            )
+
+        if clock_id not in state.clocks:
+            # Create new clock
+            state.clocks[clock_id] = {
+                "value": 0,
+                "max": 10,
+                "source": effect.source or "unknown",
+                "created_turn": state.scene.round,
+            }
+
+        clock = state.clocks[clock_id]
+        old_value = clock["value"]
+
+        # Handle dice expressions in delta field
+        dice_log = []
+        if effect.delta is not None:
+            if isinstance(effect.delta, str) and any(
+                char in str(effect.delta) for char in "d+-"
+            ):
+                # Delta contains dice expression - roll it
+                import random
+
+                if seed is not None:
+                    random.seed(seed)
+                delta = self._roll_dice_expression_with_details(
+                    str(effect.delta), random, dice_log
+                )
+            else:
+                # Delta is already a number
+                delta = int(effect.delta)
+        else:
+            delta = 0
+
+        new_value = max(0, min(clock.get("max", 10), old_value + delta))
+
+        clock["value"] = new_value
+        clock["last_modified_turn"] = state.scene.round
+        clock["last_modified_by"] = effect.source or "unknown"
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={"value": old_value},
+            after={"value": new_value},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+            dice_log=dice_log,
+        )
+
+    def _apply_tag_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply tag effect and return enhanced log entry."""
+        if effect.target == "scene":
+            # Apply to scene
+            old_tags = state.scene.tags.copy()
+            new_tags = old_tags.copy()
+
+            if effect.add:
+                new_tags[effect.add] = effect.value or effect.note or "true"
+            if effect.remove and effect.remove in new_tags:
+                del new_tags[effect.remove]
+
+            state.scene.tags = new_tags
+
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={"scene_tags": old_tags},
+                after={"scene_tags": new_tags},
+                ok=True,
+                actor=actor,
+                seed=seed,
+                state=state,
+            )
+        else:
+            # Apply to entity
+            entity = state.entities[effect.target]
+            old_tags = entity.tags.copy()
+            new_tags = old_tags.copy()
+
+            if effect.add:
+                new_tags[effect.add] = effect.value or effect.note or "true"
+            if effect.remove and effect.remove in new_tags:
+                del new_tags[effect.remove]
+
+            updated_entity = entity.model_copy(update={"tags": new_tags})
+            state.entities[effect.target] = updated_entity
+
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={"tags": old_tags},
+                after={"tags": new_tags},
+                ok=True,
+                actor=actor,
+                seed=seed,
+                state=state,
+            )
+
+    def _apply_resource_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply resource effect and return enhanced log entry with dice expression support."""
+        import random
+
+        entity = state.entities[effect.target]
+
+        resource_id = effect.id
+        if resource_id is None:
+            return self._create_enhanced_log_entry(
+                effect=effect,
+                before={},
+                after={},
+                ok=False,
+                error="Resource ID is required for resource effect",
+                actor=actor,
+                seed=seed,
+                state=state,
+            )
+
+        # Get or create resources dict
+        old_resources = getattr(entity, "resources", {}).copy()
+        new_resources = old_resources.copy()
+
+        # Handle dice expressions in delta field
+        dice_log = []
+        if effect.delta is not None:
+            if isinstance(effect.delta, str) and any(
+                char in str(effect.delta) for char in "d+-"
+            ):
+                # Delta contains dice expression - roll it
+                if seed is not None:
+                    random.seed(seed)
+                delta = self._roll_dice_expression_with_details(
+                    str(effect.delta), random, dice_log
+                )
+            else:
+                # Delta is already a number
+                delta = int(effect.delta)
+        else:
+            delta = 0
+
+        old_value = old_resources.get(resource_id, 0)
+        new_value = max(0, old_value + delta)
+
+        new_resources[resource_id] = new_value
+
+        # For this to work, we'd need to add resources field to entities
+        # For now, use tags as a workaround
+        updated_entity = entity.model_copy(
+            update={"tags": {**entity.tags, f"resource_{resource_id}": str(new_value)}}
+        )
+        state.entities[effect.target] = updated_entity
+
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={resource_id: old_value},
+            after={resource_id: new_value},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+            dice_log=dice_log,
+        )
+
+    def _apply_meta_effect(
+        self,
+        effect: Effect,
+        state: GameState,
+        actor: Optional[str] = None,
+        seed: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Apply meta effect and return enhanced log entry."""
+        # Meta effects modify metadata - this is a simplified implementation
+        return self._create_enhanced_log_entry(
+            effect=effect,
+            before={},
+            after={},
+            ok=True,
+            actor=actor,
+            seed=seed,
+            state=state,
+        )
+
+    def _rollback_state(self, state: GameState, snapshot: Dict[str, Any]) -> None:
+        """Rollback state to snapshot."""
+        # Restore entities
+        for entity_id, entity_snapshot in snapshot.items():
+            if entity_id in ("clocks", "scene_tags", "scene_pending_effects"):
+                continue
+            if entity_id in state.entities:
+                state.entities[entity_id] = entity_snapshot
+
+        # Restore clocks
+        if "clocks" in snapshot:
+            state.clocks = snapshot["clocks"]
+
+        # Restore scene-level structures
+        if "scene_tags" in snapshot:
+            state.scene.tags = snapshot["scene_tags"]
+
+        if "scene_pending_effects" in snapshot:
+            state.scene.pending_effects = snapshot["scene_pending_effects"]
+
+    def _generate_narration_hint(
+        self, logs: List[Dict[str, Any]], actor: Optional[str]
+    ) -> Dict[str, Any]:
+        """Generate narration hint from effect logs."""
+        if not logs:
+            return {
+                "summary": "No effects applied",
+                "tone_tags": ["neutral"],
+                "sentences_max": 1,
+            }
+
+        # Group effects by target
+        targets = {}
+        for log in logs:
+            effect = log["effect"]
+            target = effect["target"]
+            if target not in targets:
+                targets[target] = []
+            targets[target].append(log)
+
+        # Generate summary
+        summaries = []
+        for target, target_logs in targets.items():
+            entity_name = target
+            if target in ["scene"]:
+                entity_name = "scene"
+            elif "." in target:
+                # Extract name from ID like "pc.arin" -> "arin"
+                entity_name = target.split(".")[-1].title()
+
+            effects_desc = []
+            for log in target_logs:
+                effect = log["effect"]
+                if effect["type"] == "hp":
+                    delta = effect.get("delta", 0)
+                    # Handle dice expressions that haven't been resolved yet
+                    if isinstance(delta, str):
+                        # Use log info to determine actual effect
+                        if "after" in log and "before" in log:
+                            before_hp = log["before"].get("hp", 0)
+                            after_hp = log["after"].get("hp", 0)
+                            actual_delta = after_hp - before_hp
+                            if actual_delta > 0:
+                                effects_desc.append(f"healed {actual_delta} HP")
+                            elif actual_delta < 0:
+                                effects_desc.append(f"took {abs(actual_delta)} damage")
+                            else:
+                                effects_desc.append("HP unchanged")
+                        else:
+                            # Fallback - just mention HP effect
+                            effects_desc.append("HP affected")
+                    else:
+                        # Regular integer delta
+                        if delta > 0:
+                            effects_desc.append(f"healed {delta} HP")
+                        else:
+                            effects_desc.append(f"took {abs(delta)} damage")
+                elif effect["type"] == "position":
+                    effects_desc.append(
+                        f"moved to {effect.get('to', 'unknown location')}"
+                    )
+                elif effect["type"] == "mark":
+                    if effect.get("add"):
+                        effects_desc.append(f"gained {effect['add']} mark")
+                    if effect.get("remove"):
+                        effects_desc.append(f"lost {effect['remove']} mark")
+                else:
+                    effects_desc.append(f"{effect['type']} changed")
+
+            if effects_desc:
+                summaries.append(f"{entity_name} {' and '.join(effects_desc)}")
+
+        summary = ". ".join(summaries) if summaries else "Effects applied"
+
+        # Determine tone tags
+        tone_tags = ["mechanical"]
+        if any("damage" in s for s in summaries):
+            tone_tags.append("damage")
+        if any("healed" in s for s in summaries):
+            tone_tags.append("healing")
+        if any("moved" in s for s in summaries):
+            tone_tags.append("movement")
+
+        return {
+            "summary": summary,
+            "tone_tags": tone_tags,
+            "sentences_max": 2,
+            "salient_entities": list(targets.keys()),
+        }
+
+    def _generate_audit_trail(
+        self, logs: List[Dict[str, Any]], actor: Optional[str], state: GameState
+    ) -> str:
+        """Generate human-readable audit trail from effect logs."""
+        if not logs:
+            return "No changes applied"
+
+        # Get current round number
+        current_round = getattr(state.scene, "round", 1)
+
+        changes = []
+        for log in logs:
+            if not log.get("ok", False):
+                continue  # Skip failed effects
+
+            effect = log["effect"]
+            before = log.get("before", {})
+            after = log.get("after", {})
+
+            # Extract entity name from target
+            target = effect["target"]
+            entity_name = target
+            if "." in target:
+                entity_name = target.split(".")[-1].title()
+            elif target == "scene":
+                entity_name = "Scene"
+
+            # Generate change descriptions based on effect type
+            if effect["type"] == "hp":
+                before_hp = (
+                    before.get("hp", {}).get("current", 0)
+                    if isinstance(before.get("hp"), dict)
+                    else before.get("hp", 0)
+                )
+                after_hp = (
+                    after.get("hp", {}).get("current", 0)
+                    if isinstance(after.get("hp"), dict)
+                    else after.get("hp", 0)
+                )
+                if before_hp != after_hp:
+                    changes.append(f"{entity_name}.hp: {before_hp} → {after_hp}")
+
+            elif effect["type"] == "position":
+                before_zone = before.get("zone", "unknown")
+                after_zone = after.get("zone", "unknown")
+                if before_zone != after_zone:
+                    changes.append(f"{entity_name}.zone: {before_zone} → {after_zone}")
+
+            elif effect["type"] == "guard":
+                before_guard = before.get("guard", 0)
+                after_guard = after.get("guard", 0)
+                if before_guard != after_guard:
+                    changes.append(
+                        f"{entity_name}.guard: {before_guard} → {after_guard}"
+                    )
+
+            elif effect["type"] == "mark":
+                # Check if marks actually changed
+                before_marks = before.get("marks", {})
+                after_marks = after.get("marks", {})
+
+                if effect.get("add"):
+                    mark_name = effect["add"]
+                    if mark_name in after_marks and mark_name not in before_marks:
+                        changes.append(f"{entity_name}.marks: +{mark_name}")
+
+                if effect.get("remove"):
+                    mark_name = effect["remove"]
+                    if mark_name in before_marks and mark_name not in after_marks:
+                        changes.append(f"{entity_name}.marks: -{mark_name}")
+
+            elif effect["type"] == "inventory":
+                item_id = effect.get("id", "item")
+                delta = effect.get("delta", 0)
+                if delta > 0:
+                    changes.append(f"{entity_name}.inventory: +{delta} {item_id}")
+                elif delta < 0:
+                    changes.append(f"{entity_name}.inventory: {delta} {item_id}")
+
+            elif effect["type"] == "clock":
+                clock_id = effect.get("id", "clock")
+                before_value = before.get("value", 0)
+                after_value = after.get("value", 0)
+                if before_value != after_value:
+                    changes.append(
+                        f"{entity_name}.{clock_id}: {before_value} → {after_value}"
+                    )
+
+            elif effect["type"] == "tag":
+                if effect.get("add"):
+                    tag_name = effect["add"]
+                    changes.append(f"{entity_name}.tags: +{tag_name}")
+                if effect.get("remove"):
+                    tag_name = effect["remove"]
+                    changes.append(f"{entity_name}.tags: -{tag_name}")
+
+            elif effect["type"] == "resource":
+                resource_id = effect.get("id", "resource")
+                before_value = before.get("value", 0)
+                after_value = after.get("value", 0)
+                if before_value != after_value:
+                    changes.append(
+                        f"{entity_name}.{resource_id}: {before_value} → {after_value}"
+                    )
+
+        if not changes:
+            return "No visible changes"
+
+        # Format as audit trail
+        actor_prefix = f"[{actor}] " if actor else ""
+        round_prefix = f"[Round {current_round}] "
+        change_list = ", ".join(changes)
+
+        return f"{round_prefix}{actor_prefix}{change_list}"
+
+    def _check_reaction_triggers(self, log_entry: Dict[str, Any]) -> List[Effect]:
+        """Check if any reaction rules are triggered by this effect log and return reactive effects."""
+        reactive_effects = []
+
+        effect = log_entry["effect"]
+        before = log_entry.get("before", {})
+        after = log_entry.get("after", {})
+
+        # Only check reactions for successful effects
+        if not log_entry.get("ok", False):
+            return reactive_effects
+
+        for rule_name, rule in self.REACTION_RULES.items():
+            trigger = rule["trigger"]
+
+            # Check if effect type matches
+            if trigger["type"] != effect["type"]:
+                continue
+
+            # Evaluate condition
+            condition = trigger["condition"]
+            try:
+                # Create evaluation context
+                eval_context = {"effect": effect, "before": before, "after": after}
+
+                # Safely evaluate condition
+                if self._safe_eval_condition(condition, eval_context):
+                    # Create reactive effects
+                    for reactive_effect_data in rule["effects"]:
+                        # Create Effect object for reactive effect
+                        reactive_effect = Effect(
+                            type=reactive_effect_data["type"],
+                            target=effect["target"],  # Apply to same target by default
+                            source=reactive_effect_data.get("source"),
+                            delta=reactive_effect_data.get("delta"),
+                            add=reactive_effect_data.get("add"),
+                            remove=reactive_effect_data.get("remove"),
+                            to=reactive_effect_data.get("to"),
+                            id=reactive_effect_data.get("id"),
+                            cause=f"reaction_{rule_name}",
+                            note=f"Triggered by {effect['type']} effect",
+                        )
+                        reactive_effects.append(reactive_effect)
+
+            except Exception as e:
+                # Log but don't fail on reaction evaluation errors
+                import logging
+
+                logging.warning(f"Reaction rule {rule_name} evaluation failed: {e}")
+                continue
+
+        return reactive_effects
+
+    def _safe_eval_condition(self, condition: str, context: Dict[str, Any]) -> bool:
+        """Safely evaluate a reaction condition with limited context."""
+        # Simple condition evaluation for basic comparisons
+        # This is a simplified implementation - in production you'd want a proper expression evaluator
+
+        if condition == "True":
+            return True
+        elif condition == "False":
+            return False
+
+        # Handle common patterns
+        if "after.hp.current" in condition and "before.hp.current" in condition:
+            # Handle both nested ({"hp": {"current": 15}}) and flat ({"hp": 15}) structures
+            after_hp = self._safe_get_nested(context["after"], "hp.current", None)
+            if after_hp is None:
+                after_hp = context["after"].get("hp", 0)
+
+            before_hp = self._safe_get_nested(context["before"], "hp.current", None)
+            if before_hp is None:
+                before_hp = context["before"].get("hp", 0)
+
+            # Replace values in condition string
+            eval_condition = condition.replace("after.hp.current", str(after_hp))
+            eval_condition = eval_condition.replace("before.hp.current", str(before_hp))
+
+            try:
+                return eval(eval_condition)
+            except Exception:
+                return False
+
+        elif "after.hp.current" in condition:
+            # Handle both nested ({"hp": {"current": 15}}) and flat ({"hp": 15}) structures
+            after_hp = self._safe_get_nested(context["after"], "hp.current", None)
+            if after_hp is None:
+                after_hp = context["after"].get("hp", 0)
+
+            eval_condition = condition.replace("after.hp.current", str(after_hp))
+
+            try:
+                return eval(eval_condition)
+            except Exception:
+                return False
+            except:
+                return False
+
+        elif "effect.add" in condition:
+            effect_add = context["effect"].get("add")
+            if effect_add is None:
+                return False
+
+            # Handle string equality checks like "effect.add == 'fear'"
+            if "==" in condition:
+                parts = condition.split("==")
+                if len(parts) == 2:
+                    expected_value = parts[1].strip().strip("'\"")
+                    return effect_add == expected_value
+
+        return False
+
+    def _safe_get_nested(
+        self, obj: Dict[str, Any], path: str, default: Any = None
+    ) -> Any:
+        """Safely get nested dictionary values using dot notation."""
+        keys = path.split(".")
+        current = obj
+
+        for key in keys:
+            if isinstance(current, dict) and key in current:
+                current = current[key]
+            else:
+                return default
+
+        return current
+
+    def _process_reactive_effects(
+        self,
+        primary_logs: List[Dict[str, Any]],
+        state: GameState,
+        actor: Optional[str],
+        seed: int,
+    ) -> List[Dict[str, Any]]:
+        """Process reactive effects triggered by primary effects."""
+        reactive_logs = []
+        reaction_queue = []
+
+        # Collect all reactive effects from primary effects
+        for log_entry in primary_logs:
+            reactive_effects = self._check_reaction_triggers(log_entry)
+            reaction_queue.extend(reactive_effects)
+
+        # Process reactive effects (with depth limit to prevent infinite loops)
+        max_depth = 3
+        current_depth = 0
+
+        while reaction_queue and current_depth < max_depth:
+            current_depth += 1
+            current_batch = reaction_queue.copy()
+            reaction_queue.clear()
+
+            for reactive_effect in current_batch:
+                try:
+                    # Apply reactive effect
+                    reactive_log = self._dispatch_effect(
+                        reactive_effect, state, f"{actor}_reaction", seed
+                    )
+                    reactive_logs.append(reactive_log)
+
+                    # Check for second-order reactions
+                    if reactive_log.get("ok", False):
+                        second_order_effects = self._check_reaction_triggers(
+                            reactive_log
+                        )
+                        reaction_queue.extend(second_order_effects)
+
+                except Exception as e:
+                    # Log reactive effect failure but don't fail the transaction
+                    reactive_log = self._create_enhanced_log_entry(
+                        effect=reactive_effect,
+                        before={},
+                        after={},
+                        ok=False,
+                        error=f"Reactive effect failed: {str(e)}",
+                        actor=f"{actor}_reaction",
+                        seed=seed,
+                        state=state,
+                    )
+                    reactive_logs.append(reactive_log)
+
+        return reactive_logs
+
+    def _evaluate_effect_condition(self, effect: Effect, state: GameState) -> bool:
+        """Evaluate whether an effect's condition is met."""
+        if not effect.condition:
+            return True  # No condition means always apply
+
+        try:
+            # Create evaluation context with target entity data
+            entity = state.entities.get(effect.target)
+            if not entity:
+                return False  # Target doesn't exist
+
+            # Build context for condition evaluation - safely access HP for living entities only
+            hp_current = 0
+            hp_attr = getattr(entity, "hp", None)
+            if hp_attr is not None:
+                hp_current = getattr(hp_attr, "current", 0)
+
+            context = {
+                "target": {
+                    "hp": {"current": hp_current},
+                    "guard": getattr(entity, "guard", 0),
+                    "tags": getattr(entity, "tags", {}),
+                    "marks": getattr(entity, "marks", {}),
+                },
+                "scene": {
+                    "round": state.scene.round,
+                    "turn_index": state.scene.turn_index,
+                },
+            }
+
+            # Use similar evaluation logic as reactive effects
+            return self._safe_eval_effect_condition(effect.condition, context)
+
+        except Exception as e:
+            import logging
+
+            logging.warning(f"Condition evaluation failed for {effect.condition}: {e}")
+            return False
+
+    def _safe_eval_effect_condition(
+        self, condition: str, context: Dict[str, Any]
+    ) -> bool:
+        """Safely evaluate an effect condition with target context."""
+        # Handle common condition patterns
+        if condition == "True":
+            return True
+        elif condition == "False":
+            return False
+
+        # Handle target.hp.current patterns
+        if "target.hp.current" in condition:
+            target_hp = context.get("target", {}).get("hp", {}).get("current", 0)
+            eval_condition = condition.replace("target.hp.current", str(target_hp))
+
+            try:
+                return eval(eval_condition)
+            except:
+                return False
+
+        # Handle shorthand hp patterns (e.g., "hp > 10" -> "target.hp.current > 10")
+        if "hp" in condition and "target.hp" not in condition:
+            target_hp = context.get("target", {}).get("hp", {}).get("current", 0)
+            eval_condition = condition.replace("hp", str(target_hp))
+
+            try:
+                return eval(eval_condition)
+            except:
+                return False
+
+        # Handle target.guard patterns
+        if "target.guard" in condition:
+            target_guard = context.get("target", {}).get("guard", 0)
+            eval_condition = condition.replace("target.guard", str(target_guard))
+
+            try:
+                return eval(eval_condition)
+            except:
+                return False
+
+        # Handle shorthand guard patterns (e.g., "guard > 5" -> "target.guard > 5")
+        if "guard" in condition and "target.guard" not in condition:
+            target_guard = context.get("target", {}).get("guard", 0)
+            eval_condition = condition.replace("guard", str(target_guard))
+
+            try:
+                return eval(eval_condition)
+            except:
+                return False
+
+        # Handle scene.round patterns
+        if "scene.round" in condition:
+            scene_round = context.get("scene", {}).get("round", 1)
+            eval_condition = condition.replace("scene.round", str(scene_round))
+
+            try:
+                return eval(eval_condition)
+            except:
+                return False
+
+        # Default: try literal evaluation
+        try:
+            return eval(condition)
+        except:
+            return False
+
+    def _schedule_timed_effect(
+        self, effect: Effect, state: GameState, actor: Optional[str], seed: int
+    ) -> None:
+        """Schedule a timed effect for future execution."""
+        # Calculate when the effect should trigger
+        after_rounds = effect.after_rounds or 0
+        trigger_round = state.scene.round + after_rounds
+
+        # Create pending effect entry
+        pending_effect = PendingEffect(
+            effect=effect.model_dump(),
+            trigger_round=trigger_round,
+            actor=actor,
+            seed=seed,
+            scheduled_at=state.scene.round,
+            id=f"timed_{seed}_{len(state.scene.pending_effects) if hasattr(state.scene, 'pending_effects') else 0}",
+        )
+
+        # Add to pending effects queue
+        if not hasattr(state.scene, "pending_effects"):
+            state.scene.pending_effects = []
+        state.scene.pending_effects.append(pending_effect)
+
+    def _process_pending_effects(self, state: GameState) -> List[Dict[str, Any]]:
+        """Process any timed effects that should trigger this round."""
+        if not hasattr(state.scene, "pending_effects"):
+            return []
+
+        current_round = state.scene.round
+        triggered_logs = []
+        remaining_effects = []
+
+        for pending in state.scene.pending_effects:
+            if pending.trigger_round <= current_round:
+                # Effect should trigger now
+                try:
+                    effect_data = pending.effect
+                    effect = Effect(**effect_data)
+                    actor = pending.actor
+                    seed = pending.seed
+
+                    # Apply the timed effect
+                    log_entry = self._dispatch_effect(
+                        effect, state, f"{actor}_timed", seed
+                    )
+                    log_entry["timed_effect_id"] = pending.id
+                    triggered_logs.append(log_entry)
+
+                except Exception as e:
+                    # Log timed effect failure
+                    error_log = {
+                        "effect": effect_data,
+                        "ok": False,
+                        "error": f"Timed effect failed: {str(e)}",
+                        "actor": f"{pending.actor}_timed",
+                        "timed_effect_id": pending.id,
+                    }
+                    triggered_logs.append(error_log)
+            else:
+                # Effect not ready yet, keep it in queue
+                remaining_effects.append(pending)
+
+        # Update pending effects queue
+        state.scene.pending_effects = remaining_effects
+
+        return triggered_logs
+
     def _execute_apply_effects(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute apply_effects tool."""
-        effects = args.get("effects", [])
+        """Execute apply_effects tool with transactional rollback and comprehensive logging."""
+        try:
+            # Extract and validate arguments
+            effects_data = args.get("effects", [])
+            actor = args.get("actor")
+            transactional = args.get("transactional", True)
+            transaction_mode = args.get("transaction_mode", "strict")
+            replay_seed = args.get(
+                "seed", seed
+            )  # For deterministic replay, use args seed or fallback to function seed
+            validation_errors = []  # Initialize validation errors list
 
-        return ToolResult(
-            ok=True,
-            tool_id="apply_effects",
-            args=args,
-            facts={"effects_applied": len(effects)},
-            effects=effects,
-            narration_hint={
-                "summary": f"Applied {len(effects)} effects",
-                "tone_tags": ["mechanical"],
-                "salient_entities": [],
-            },
-        )
+            # Check if this is a pure empty call or if there are pending timed effects to process
+            if not effects_data:
+                # Check if there are pending timed effects that could be triggered
+                has_pending_effects = (
+                    hasattr(state.scene, "pending_effects")
+                    and len(state.scene.pending_effects) > 0
+                )
+
+                if not has_pending_effects:
+                    # Pure empty call with no pending effects - this is an error
+                    return ToolResult(
+                        ok=False,
+                        tool_id="apply_effects",
+                        args=args,
+                        facts={},
+                        effects=[],
+                        narration_hint={
+                            "summary": "No effects to apply",
+                            "tone_tags": ["error"],
+                            "salient_entities": [],
+                        },
+                        error_message="No effects provided",
+                    )
+                # If there are pending effects, continue processing with empty effects list
+                effects_data = []
+
+            # Convert dict effects to Effect objects for validation
+            effects = []
+            for effect_data in effects_data:
+                try:
+                    if isinstance(effect_data, dict):
+                        effect = Effect(**effect_data)
+                    else:
+                        effect = effect_data  # Already an Effect object
+                    effects.append(effect)
+                except ValidationError as e:
+                    return ToolResult(
+                        ok=False,
+                        tool_id="apply_effects",
+                        args=args,
+                        facts={},
+                        effects=[],
+                        narration_hint={
+                            "summary": f"Effect validation failed: {e}",
+                            "tone_tags": ["error"],
+                            "salient_entities": [],
+                        },
+                        error_message=f"Effect validation failed: {e}",
+                    )
+
+            # Pre-validation phase - handle validation errors based on transaction mode
+            validation_errors = []
+            for i, effect in enumerate(effects):
+                error = self._validate_effect(effect, state)
+                if error:
+                    validation_errors.append((i, effect, error))
+
+            # Handle validation errors based on transaction mode
+            if validation_errors:
+                if transaction_mode == "strict":
+                    # Strict mode: fail on any validation error
+                    first_error = validation_errors[0][2]
+                    return ToolResult(
+                        ok=False,
+                        tool_id="apply_effects",
+                        args=args,
+                        facts={
+                            "applied": 0,
+                            "skipped": len(effects),
+                            "transaction_mode": transaction_mode,
+                            "total_effects": len(effects),
+                        },
+                        effects=[],
+                        narration_hint={
+                            "summary": f"Effect validation failed: {first_error}",
+                            "tone_tags": ["error"],
+                            "salient_entities": [],
+                        },
+                        error_message=first_error,
+                    )
+                elif transaction_mode in ["partial", "best_effort"]:
+                    # Remove invalid effects, continue with valid ones
+                    invalid_indices = {i for i, _, _ in validation_errors}
+                    original_effects_count = len(effects)
+                    effects = [
+                        effect
+                        for i, effect in enumerate(effects)
+                        if i not in invalid_indices
+                    ]
+
+                    # If no valid effects remain and in partial mode, fail
+                    if not effects and transaction_mode == "partial":
+                        return ToolResult(
+                            ok=False,
+                            tool_id="apply_effects",
+                            args=args,
+                            facts={
+                                "applied": 0,
+                                "skipped": original_effects_count,
+                                "transaction_mode": transaction_mode,
+                                "total_effects": original_effects_count,
+                            },
+                            effects=[],
+                            narration_hint={
+                                "summary": "All effects failed validation",
+                                "tone_tags": ["error"],
+                                "salient_entities": [],
+                            },
+                            error_message="All effects failed validation",
+                        )
+
+            # Store original total for facts
+            original_effects_count = len(args.get("effects", []))
+
+            # Create snapshot for rollback if transactional
+            snapshot = None
+            if transactional:
+                snapshot = self._create_snapshot(state, effects)
+            if transactional:
+                snapshot = self._create_snapshot(state, effects)
+
+            # Apply effects atomically
+            logs = []
+            applied_count = 0
+            skipped_count = 0
+            failed_count = 0  # Track actual failures vs graceful skips
+            scheduled_count = 0  # Track effects scheduled for future execution
+
+            # First: Process any pending timed effects that should trigger this round
+            timed_effect_logs = self._process_pending_effects(state)
+            logs.extend(timed_effect_logs)
+
+            # Process reactive effects for timed effects if any were triggered
+            if timed_effect_logs:
+                timed_actor = f"{actor or 'unknown'}_timed_reactive"
+                reactive_logs_from_timed = self._process_reactive_effects(
+                    timed_effect_logs, state, timed_actor, replay_seed
+                )
+                logs.extend(reactive_logs_from_timed)
+
+            # Count timed effects separately
+            timed_applied_count = sum(
+                1 for log in timed_effect_logs if log.get("ok", True)
+            )
+
+            # Add validation error logs if any effects were skipped due to validation
+            if validation_errors:
+                for i, effect, error in validation_errors:
+                    log_entry = self._create_enhanced_log_entry(
+                        effect=effect,
+                        before={},
+                        after={},
+                        ok=False,
+                        error=f"Validation failed: {error}",
+                        actor=actor,
+                        seed=replay_seed,
+                        state=state,
+                    )
+                    logs.append(log_entry)
+                    skipped_count += 1
+                    failed_count += 1  # Validation failures are real failures
+
+            try:
+                for effect in effects:
+                    try:
+                        # Check if effect has a condition that must be evaluated
+                        if effect.condition:
+                            if not self._evaluate_effect_condition(effect, state):
+                                # Condition not met - skip this effect
+                                log_entry = self._create_enhanced_log_entry(
+                                    effect=effect,
+                                    before={},
+                                    after={},
+                                    ok=False,
+                                    error=f"Condition not met: {effect.condition}",
+                                    actor=actor,
+                                    seed=replay_seed,
+                                    state=state,
+                                )
+                                logs.append(log_entry)
+                                skipped_count += 1
+                                continue
+
+                        # Check if effect should be delayed (timed effect)
+                        if effect.after_rounds and effect.after_rounds > 0:
+                            # Schedule effect for future execution
+                            self._schedule_timed_effect(
+                                effect, state, actor, replay_seed
+                            )
+
+                            # Log that effect was scheduled
+                            log_entry = self._create_enhanced_log_entry(
+                                effect=effect,
+                                before={},
+                                after={},
+                                ok=True,
+                                error=f"Scheduled for +{effect.after_rounds} rounds",
+                                actor=actor,
+                                seed=replay_seed,
+                                state=state,
+                            )
+                            logs.append(log_entry)
+                            scheduled_count += 1  # Count as scheduled, not applied
+                            continue
+
+                        # Apply effect immediately using registry dispatch
+                        log_entry = self._dispatch_effect(
+                            effect, state, actor, replay_seed
+                        )
+
+                        logs.append(log_entry)
+                        error_msg = log_entry.get("error")
+                        if log_entry.get("ok", True) and (
+                            error_msg is None
+                            or not error_msg.startswith("Unknown effect type")
+                        ):
+                            applied_count += 1
+                        else:
+                            skipped_count += 1
+                            if error_msg is None or not error_msg.startswith(
+                                "Unknown effect type"
+                            ):
+                                failed_count += (
+                                    1  # Only count real failures, not graceful skips
+                                )
+
+                    except Exception as e:
+                        # Individual effect failed
+                        log_entry = self._create_enhanced_log_entry(
+                            effect=effect,
+                            before={},
+                            after={},
+                            ok=False,
+                            error=str(e),
+                            actor=actor,
+                            seed=replay_seed,
+                            state=state,
+                        )
+                        logs.append(log_entry)
+                        skipped_count += 1
+                        failed_count += 1  # Exception failures are real failures
+
+                        # Handle failure based on transaction mode
+                        if transactional and transaction_mode == "strict":
+                            # Strict mode: any failure causes full rollback
+                            if snapshot:
+                                self._rollback_state(state, snapshot)
+                            return ToolResult(
+                                ok=False,
+                                tool_id="apply_effects",
+                                args=args,
+                                facts={
+                                    "applied": 0,
+                                    "skipped": len(effects),
+                                    "transaction_mode": transaction_mode,
+                                },
+                                effects=[],
+                                narration_hint={
+                                    "summary": f"Transaction failed: {str(e)}",
+                                    "tone_tags": ["error"],
+                                    "salient_entities": [],
+                                },
+                                error_message=f"Transaction failed: {str(e)}",
+                            )
+                        elif transactional and transaction_mode == "partial":
+                            # Partial mode: rollback only failed effect, continue with others
+                            # (In this simple implementation, we just continue - no per-effect rollback yet)
+                            continue
+                        # best_effort mode: log failure and continue without rollback
+
+                # Second pass: Process reactive effects
+                reactive_effects_logs = self._process_reactive_effects(
+                    logs, state, actor, replay_seed
+                )
+                logs.extend(reactive_effects_logs)
+
+                # Track reactive effects separately (don't add to primary counts for backward compatibility)
+                reactive_applied_count = 0
+                reactive_failed_count = 0
+                for reactive_log in reactive_effects_logs:
+                    if reactive_log.get("ok", True):
+                        reactive_applied_count += 1
+                    else:
+                        reactive_failed_count += 1
+
+                # Store effect logs in state for replay/undo
+                if not hasattr(state.scene, "last_effect_log"):
+                    state.scene.last_effect_log = []
+                state.scene.last_effect_log.extend(logs)
+
+                # Generate and store human-readable audit trail
+                audit_trail = self._generate_audit_trail(logs, actor, state)
+                state.scene.last_diff_summary = audit_trail
+
+                # Generate narration hint
+                narration_hint = self._generate_narration_hint(logs, actor)
+
+                # Collect unique targets for facts
+                targets = list(set(effect.target for effect in effects))
+
+                # Determine overall success based on transaction mode
+                overall_success = True
+                if transaction_mode == "strict" and failed_count > 0:
+                    # Strict mode fails only on actual failures, not graceful skips
+                    overall_success = False
+                elif transaction_mode == "partial" and applied_count == 0:
+                    # Partial mode requires at least one effect to succeed
+                    overall_success = False
+                # best_effort always succeeds if no critical errors occurred
+
+                return ToolResult(
+                    ok=overall_success,
+                    tool_id="apply_effects",
+                    args=args,
+                    facts={
+                        "applied": applied_count,
+                        "skipped": skipped_count,
+                        "scheduled": scheduled_count,
+                        "targets": targets,
+                        "transaction_mode": transaction_mode,
+                        "total_effects": original_effects_count,
+                        "reactive_applied": reactive_applied_count,
+                        "reactive_failed": reactive_failed_count,
+                        "timed_applied": timed_applied_count,
+                        "pending_effects_count": (
+                            len(state.scene.pending_effects)
+                            if hasattr(state.scene, "pending_effects")
+                            else 0
+                        ),
+                    },
+                    effects=logs,
+                    narration_hint=narration_hint,
+                )
+
+            except Exception as e:
+                # Critical failure during application
+                if transactional and snapshot:
+                    self._rollback_state(state, snapshot)
+
+                return ToolResult(
+                    ok=False,
+                    tool_id="apply_effects",
+                    args=args,
+                    facts={
+                        "applied": 0,
+                        "skipped": original_effects_count,
+                        "transaction_mode": transaction_mode,
+                        "total_effects": original_effects_count,
+                    },
+                    effects=[],
+                    narration_hint={
+                        "summary": f"Critical failure: {str(e)}",
+                        "tone_tags": ["error"],
+                        "salient_entities": [],
+                    },
+                    error_message=f"Critical failure: {str(e)}",
+                )
+
+        except Exception as e:
+            # Top-level error handling
+            return ToolResult(
+                ok=False,
+                tool_id="apply_effects",
+                args=args,
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": f"Unexpected error: {str(e)}",
+                    "tone_tags": ["error"],
+                    "salient_entities": [],
+                },
+                error_message=f"Unexpected error: {str(e)}",
+            )
 
     def _execute_ask_clarifying(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
