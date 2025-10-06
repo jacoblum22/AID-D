@@ -33,7 +33,7 @@ They will be enhanced in future development phases.
 """
 
 from typing import Dict, List, Optional, Any, Callable, Union, Literal, Annotated
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 import re
 
 
@@ -142,10 +142,174 @@ class GetInfoArgs(ToolArgs):
     use_refs: bool = False  # Use refs structure to reduce duplication
 
 
-class ApplyEffectsArgs(ToolArgs):
-    """Arguments for apply_effects tool."""
+class Effect(BaseModel):
+    """
+    Single effect to apply to game state.
 
-    effects: List[Dict[str, Any]]
+    Effects represent atomic changes to the game world. Each effect type has specific
+    required fields and validation rules:
+
+    - hp: Requires 'delta' (damage/healing amount)
+    - position: Requires 'to' (target zone)
+    - mark/tag: Requires either 'add' or 'remove' (or both)
+    - clock: Requires 'id' and 'delta' (clock identifier and time change)
+    - inventory: Requires 'id' and 'delta' (item identifier and quantity change)
+    - resource: Requires 'id' and 'delta' (resource identifier and amount change)
+    - guard: Requires 'delta' (guard value change)
+
+    Conditional & Timed Effects:
+    - condition: Effect only applies if condition evaluates to true
+    - after_rounds: Effect is scheduled to apply after N rounds (must be >= 0)
+    - duration: Effect lasts for N rounds (must be >= 0)
+    - every_round: Effect repeats each round while duration is active
+
+    Field Interactions:
+    - condition is evaluated when the effect would trigger (after after_rounds delay)
+    - after_rounds and duration can be combined (effect waits, then lasts for duration)
+    - every_round only works with duration > 0
+    - condition is re-evaluated each round if every_round=True
+    """
+
+    type: str  # Effect type - supports core types and plugin extensions
+    target: str
+    source: Optional[str] = None
+    delta: Optional[Union[int, float, str]] = None  # "+3", "-2", "2d4+2" etc.
+    add: Optional[Union[str, Dict[str, Any], List[str]]] = (
+        None  # for mark/tag types - supports strings, dicts, or lists
+    )
+    remove: Optional[str] = None
+    to: Optional[str] = None  # new zone (for position)
+    id: Optional[str] = None  # for clock or inventory
+    cause: Optional[str] = None
+    note: Optional[str] = None
+    value: Optional[str] = None  # for tag effect values
+
+    # Conditional & Timed Effects
+    condition: Optional[str] = (
+        None  # Condition to evaluate before applying (e.g., "target.hp.current < 5")
+    )
+    after_rounds: Optional[int] = Field(
+        default=None, ge=0
+    )  # Delay in rounds before applying effect (must be non-negative)
+    duration: Optional[int] = Field(
+        default=None, ge=0
+    )  # How many rounds this effect lasts (must be non-negative)
+    every_round: Optional[bool] = (
+        None  # Whether this effect repeats each round while active
+    )
+
+    @field_validator("delta")
+    @classmethod
+    def validate_delta_format(
+        cls, v: Union[int, float, str, None]
+    ) -> Union[int, float, str, None]:
+        """Validate delta field format for dice notation and numeric values."""
+        if v is None:
+            return v
+
+        if isinstance(v, (int, float)):
+            return v
+
+        if isinstance(v, str):
+            # Allow dice notation: XdY, XdY+Z, XdY-Z, +/-XdY+/-Z, or just numbers
+            dice_pattern = r"^[+-]?(?:\d+d\d+(?:[+-]\d+)?|\d+)$"
+            if not re.match(dice_pattern, v.strip()):
+                raise ValueError(
+                    f"Invalid delta format '{v}'. Must be a number or dice notation "
+                    f"like '2d6', '1d4+2', '3d8-1', or just '5'"
+                )
+            return v
+
+        raise ValueError(f"Delta must be a number or string, got {type(v)}")
+
+    @model_validator(mode="after")
+    def validate_effect_field_combinations(self) -> "Effect":
+        """Validate that required fields are present for each effect type."""
+        effect_requirements = {
+            "hp": {"required": ["delta"], "optional": []},
+            "position": {"required": ["to"], "optional": []},
+            "mark": {"required_any": ["add", "remove"], "optional": []},
+            "tag": {"required_any": ["add", "remove"], "optional": []},
+            "clock": {"required": ["id", "delta"], "optional": []},
+            "inventory": {"required": ["id", "delta"], "optional": []},
+            "resource": {"required": ["id", "delta"], "optional": []},
+            "guard": {"required": ["delta"], "optional": []},
+        }
+
+        if self.type in effect_requirements:
+            reqs = effect_requirements[self.type]
+
+            # Check required fields
+            if "required" in reqs:
+                for field in reqs["required"]:
+                    if getattr(self, field) is None:
+                        raise ValueError(f"{self.type} effect requires '{field}' field")
+
+            # Check required_any fields (at least one must be present)
+            if "required_any" in reqs:
+                if not any(
+                    getattr(self, field) is not None for field in reqs["required_any"]
+                ):
+                    field_list = "', '".join(reqs["required_any"])
+                    raise ValueError(
+                        f"{self.type} effect requires at least one of: '{field_list}'"
+                    )
+
+        # Validate timed/conditional field interactions
+        if self.every_round and (self.duration is None or self.duration <= 0):
+            raise ValueError("every_round=True requires duration > 0")
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_known_effect_types(self) -> "Effect":
+        """Provide warnings for unknown effect types while allowing them through."""
+        known_types = {
+            "hp",
+            "guard",
+            "mark",
+            "clock",
+            "position",
+            "inventory",
+            "tag",
+            "resource",
+            "meta",
+        }
+        if self.type not in known_types:
+            # Log warning but don't fail validation - allow plugin effect types
+            import logging
+
+            logging.warning(
+                f"Unknown effect type '{self.type}' - may be a plugin effect"
+            )
+        return self
+
+
+class ApplyEffectsArgs(ToolArgs):
+    """
+    Arguments for apply_effects tool.
+
+    Transaction Modes:
+    - strict: If any effect fails validation or application, roll back ALL effects
+              and return an error. Ensures atomic all-or-nothing behavior.
+    - partial: Apply all valid effects, skip invalid ones, and continue processing.
+               Return success with details about which effects were skipped.
+    - best_effort: Attempt to apply all effects, ignore failures completely.
+                   Always return success even if all effects fail.
+
+    The transactional flag enables rollback-safe operation where state changes
+    are captured before application and can be reverted if needed.
+    """
+
+    effects: List[Effect] = Field(..., min_length=1)
+    actor: Optional[str] = None  # for audit / narration
+    transactional: bool = True  # rollback-safe mode
+    transaction_mode: Literal["strict", "partial", "best_effort"] = (
+        "strict"  # transaction behavior - see docstring for mode descriptions
+    )
+    seed: Optional[int] = Field(
+        default=None, ge=0
+    )  # for deterministic replay (must be non-negative)
 
 
 class ClarifyingOption(BaseModel):

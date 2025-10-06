@@ -1121,6 +1121,171 @@ def test_empty_target_list_prevents_indexerror(demo_state):
     assert result.error_message == "No target specified for talk action"
 
 
+def test_scene_target_validation_allows_scene_effects(demo_state):
+    """Test that effects with target='scene' are accepted by validator."""
+    from router.validator import Validator
+    from router.tool_catalog import Effect
+
+    validator = Validator()
+
+    # Create a scene-targeted tag effect
+    scene_effect = Effect(type="tag", target="scene", add="combat_active")
+
+    # Validate the effect - should not return an error
+    error = validator._validate_effect(scene_effect, demo_state)
+    assert error is None, f"Scene-targeted effect should be valid, got error: {error}"
+
+
+def test_global_target_validation_allows_global_effects(demo_state):
+    """Test that effects with target='global' are accepted by validator."""
+    from router.validator import Validator
+    from router.tool_catalog import Effect
+
+    validator = Validator()
+
+    # Create a global-targeted tag effect
+    global_effect = Effect(type="tag", target="global", add="day_cycle")
+
+    # Validate the effect - should not return an error
+    error = validator._validate_effect(global_effect, demo_state)
+    assert error is None, f"Global-targeted effect should be valid, got error: {error}"
+
+
+def test_clock_target_validation_allows_targetless_clock_effects(demo_state):
+    """Test that clock effects without entity targets are accepted."""
+    from router.validator import Validator
+    from router.tool_catalog import Effect
+
+    validator = Validator()
+
+    # Create a clock effect that targets a clock rather than an entity
+    clock_effect = Effect(
+        type="clock", target="clock.alarm_bell", id="alarm_bell", delta=5
+    )
+
+    # Validate the effect - should not return an error
+    error = validator._validate_effect(clock_effect, demo_state)
+    assert error is None, f"Clock effect should be valid, got error: {error}"
+
+
+def test_scene_snapshot_captures_scene_tags_and_pending_effects(demo_state):
+    """Test that scene tags and pending_effects are captured in snapshots."""
+    from router.validator import Validator
+    from router.tool_catalog import Effect
+
+    validator = Validator()
+
+    # Set up initial scene state
+    demo_state.scene.tags = {"alert_level": 1, "combat_active": True}
+    demo_state.scene.pending_effects = [
+        {"type": "hp", "target": "pc.arin", "delta": -1}
+    ]
+
+    # Create effects that would modify scene structures
+    effects = [
+        Effect(type="tag", target="scene", add="new_tag"),
+        Effect(type="timed", target="pc.arin", delta=5, after_rounds=3),
+    ]
+
+    # Create snapshot
+    snapshot = validator._create_snapshot(demo_state, effects)
+
+    # Verify scene structures are captured
+    assert "scene_tags" in snapshot, "Scene tags should be captured in snapshot"
+    assert (
+        "scene_pending_effects" in snapshot
+    ), "Scene pending_effects should be captured in snapshot"
+
+    # Verify the captured values match original
+    assert snapshot["scene_tags"] == {"alert_level": 1, "combat_active": True}
+    assert len(snapshot["scene_pending_effects"]) == 1
+    assert snapshot["scene_pending_effects"][0]["type"] == "hp"
+
+
+def test_scene_rollback_restores_scene_structures(demo_state):
+    """Test that scene tags and pending_effects are restored during rollback."""
+    from router.validator import Validator
+    from router.tool_catalog import Effect
+
+    validator = Validator()
+
+    # Set up initial scene state
+    original_tags = {"alert_level": 1, "combat_active": True}
+    original_pending = [{"type": "hp", "target": "pc.arin", "delta": -1}]
+    demo_state.scene.tags = original_tags.copy()
+    demo_state.scene.pending_effects = original_pending.copy()
+
+    # Create snapshot
+    effects = [Effect(type="tag", target="scene", add="new_tag")]
+    snapshot = validator._create_snapshot(demo_state, effects)
+
+    # Simulate scene mutations (what would happen during effect application)
+    demo_state.scene.tags["new_tag"] = True
+    demo_state.scene.tags["alert_level"] = 3
+    demo_state.scene.pending_effects.append(
+        {"type": "clock", "id": "timer", "delta": 2}
+    )
+
+    # Verify mutations happened
+    assert demo_state.scene.tags != original_tags
+    assert len(demo_state.scene.pending_effects) != len(original_pending)
+
+    # Rollback
+    validator._rollback_state(demo_state, snapshot)
+
+    # Verify scene structures are restored
+    assert (
+        demo_state.scene.tags == original_tags
+    ), "Scene tags should be restored to original state"
+    assert (
+        demo_state.scene.pending_effects == original_pending
+    ), "Scene pending_effects should be restored to original state"
+
+
+def test_transactional_rollback_handles_scene_mutations(demo_state):
+    """Test that scene mutations are properly rolled back when later effects fail in transactional mode."""
+    from router.validator import Validator
+    from router.tool_catalog import Effect
+    from router.game_state import Utterance
+
+    validator = Validator()
+
+    # Set up initial scene state
+    original_tags = {"alert_level": 0}
+    original_pending = []
+    demo_state.scene.tags = original_tags.copy()
+    demo_state.scene.pending_effects = original_pending.copy()
+
+    # Create effects for apply_effects tool
+    effects_data = [
+        # This scene effect should be valid and would mutate scene.tags
+        {"type": "tag", "target": "scene", "add": "alarm_triggered"},
+        # This entity effect should be valid
+        {"type": "hp", "target": "pc.arin", "delta": -5},
+        # This should be invalid and cause rollback
+        {"type": "hp", "target": "nonexistent.entity", "delta": -10},
+    ]
+
+    # Use validate_and_execute with apply_effects tool to trigger rollback
+    utterance = Utterance(text="Test transactional rollback", actor_id="pc.arin")
+
+    result = validate_and_execute(
+        "apply_effects",
+        {"effects": effects_data, "mode": "strict"},
+        demo_state,
+        utterance,
+    )
+
+    # Should fail due to invalid target and state should be rolled back
+    assert result.ok is False, "Should have failed due to invalid target"
+    assert (
+        demo_state.scene.tags == original_tags
+    ), "Scene tags should be rolled back after failed transaction"
+    assert (
+        demo_state.scene.pending_effects == original_pending
+    ), "Scene pending_effects should be rolled back after failed transaction"
+
+
 if __name__ == "__main__":
     # Run pytest when script is executed directly
     pytest.main([__file__, "-v"])
