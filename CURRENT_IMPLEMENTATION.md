@@ -60,7 +60,7 @@ tests/           # Comprehensive test suite
 - Precondition functions for tool availability
 - Argument suggestion functions
 
-**Implemented Tools (8 total):**
+**Implemented Tools (9 total - ALL COMPLETE):**
 
 #### ✅ **ask_roll** (Fully Implemented)
 - Complete dice mechanics with Style+Domain system
@@ -138,8 +138,15 @@ tests/           # Comprehensive test suite
 - Machine-readable structured facts with comprehensive error handling
 - **Status**: Production ready
 
-#### 🚧 **Placeholder Implementations:**
-- `apply_effects`: Direct effect application
+#### ✅ **apply_effects** (Fully Implemented)
+- Complete effects application system with comprehensive validation
+- Support for all effect types: hp, position, clock, guard, mark, tag, resource, inventory
+- Atomic transaction processing with rollback on failures
+- Conditional and timed effects with pending effects queue
+- Reactive effects system for automatic game logic responses
+- Security fixes for dict payload handling and expression evaluation
+- Comprehensive test coverage with 70+ test cases
+- **Status**: Production ready
 
 **Features:**
 - Dynamic precondition checking
@@ -231,6 +238,7 @@ tests/           # Comprehensive test suite
 - `test_talk.py`
 - `test_use_item.py`
 - `test_get_info.py`
+- `test_apply_effects_tool.py`
 - `test_effects.py`
 - `test_game_state.py`
 - `test_narrate_only.py`
@@ -300,15 +308,15 @@ pytest>=7.0.0
 
 ### What Works Now
 - Game state management and entity modeling
-- Tool system with **eight fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, `ask_clarifying`, `talk`, `use_item`, and `get_info`)
+- Tool system with **nine fully-featured tools** (`ask_roll`, `narrate_only`, `attack`, `move`, `ask_clarifying`, `talk`, `use_item`, `get_info`, and `apply_effects`)
 - Effect system for state changes including new tag effects
 - Validation and execution pipeline with pending choice consumption
 - Comprehensive testing
 
 ### What's Ready for Enhancement
-- Tool implementations (apply_effects - 1 remaining placeholder tool)
 - Persistence and logging
 - World state management
+- Advanced narration features
 
 ### Architecture Decisions Made
 - Pydantic for type safety and validation
@@ -319,10 +327,10 @@ pytest>=7.0.0
 
 ## Migration Path to Vision
 
-### Phase 1: Core Tool Implementation
-1. Enhance placeholder tools with full mechanics
-2. Implement template-based narration
-3. Add basic persistence (JSON)
+### Phase 1: Enhanced Narration & Persistence  
+1. Implement template-based narration system
+2. Add basic persistence (JSON snapshots)
+3. Enhance world state management
 
 ### Phase 2: World Layer
 1. Implement World/KB system

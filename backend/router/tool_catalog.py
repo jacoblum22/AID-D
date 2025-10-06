@@ -174,7 +174,9 @@ class Effect(BaseModel):
     target: str
     source: Optional[str] = None
     delta: Optional[Union[int, float, str]] = None  # "+3", "-2", "2d4+2" etc.
-    add: Optional[str] = None  # for mark/tag types
+    add: Optional[Union[str, Dict[str, Any], List[str]]] = (
+        None  # for mark/tag types - supports strings, dicts, or lists
+    )
     remove: Optional[str] = None
     to: Optional[str] = None  # new zone (for position)
     id: Optional[str] = None  # for clock or inventory

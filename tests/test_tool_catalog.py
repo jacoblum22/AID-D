@@ -8,7 +8,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]  # repo root
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from backend.router.tool_catalog import TOOL_CATALOG, Tool, AskRollArgs
+from backend.router.tool_catalog import (
+    TOOL_CATALOG, Tool, AskRollArgs, NarrateOnlyArgs, ApplyEffectsArgs, 
+    GetInfoArgs, MoveArgs, AttackArgs, TalkArgs, UseItemArgs, AskClarifyingArgs
+)
 from backend.router.game_state import (
     GameState,
     PC,
@@ -87,7 +90,17 @@ def sample_utterance():
 
 
 # List of tools that are fully implemented and should be tested normally
-IMPLEMENTED_TOOLS = {"ask_roll", "attack", "move"}
+IMPLEMENTED_TOOLS = {
+    "ask_roll", 
+    "narrate_only", 
+    "apply_effects", 
+    "get_info",
+    "move", 
+    "attack", 
+    "talk", 
+    "use_item", 
+    "ask_clarifying"
+}
 
 # Get list of all tool IDs
 ALL_TOOL_IDS = {tool.id for tool in TOOL_CATALOG}
@@ -105,10 +118,12 @@ def test_ask_roll_precondition(sample_game_state, sample_utterance):
     assert isinstance(result, bool), "ask_roll precondition should return boolean"
 
 
-@pytest.mark.parametrize("tool_id", PLACEHOLDER_TOOLS)
-def test_placeholder_tool_preconditions(tool_id, sample_game_state, sample_utterance):
-    """Test preconditions for placeholder tools (should be skipped)."""
-    pytest.skip(f"Tool '{tool_id}' is not yet fully implemented")
+# Dynamically create parametrized test only if there are placeholder tools
+if PLACEHOLDER_TOOLS:
+    @pytest.mark.parametrize("tool_id", PLACEHOLDER_TOOLS)
+    def test_placeholder_tool_preconditions(tool_id, sample_game_state, sample_utterance):
+        """Test preconditions for placeholder tools (should be skipped)."""
+        pytest.skip(f"Tool '{tool_id}' is not yet fully implemented")
 
 
 def test_ask_roll_argument_suggestions(sample_game_state, sample_utterance):
@@ -134,12 +149,14 @@ def test_ask_roll_argument_suggestions(sample_game_state, sample_utterance):
         ], "Should suggest valid action"
 
 
-@pytest.mark.parametrize("tool_id", PLACEHOLDER_TOOLS)
-def test_placeholder_tool_argument_suggestions(
-    tool_id, sample_game_state, sample_utterance
-):
-    """Test argument suggestions for placeholder tools (should be skipped)."""
-    pytest.skip(f"Tool '{tool_id}' is not yet fully implemented")
+# Dynamically create parametrized test only if there are placeholder tools
+if PLACEHOLDER_TOOLS:
+    @pytest.mark.parametrize("tool_id", PLACEHOLDER_TOOLS)
+    def test_placeholder_tool_argument_suggestions(
+        tool_id, sample_game_state, sample_utterance
+    ):
+        """Test argument suggestions for placeholder tools (should be skipped)."""
+        pytest.skip(f"Tool '{tool_id}' is not yet fully implemented")
 
 
 def test_ask_roll_schema():
@@ -174,10 +191,12 @@ def test_ask_roll_schema():
     assert instance.dc_hint == 15
 
 
-@pytest.mark.parametrize("tool_id", PLACEHOLDER_TOOLS)
-def test_placeholder_tool_schemas(tool_id):
-    """Test schemas for placeholder tools (should be skipped)."""
-    pytest.skip(f"Tool '{tool_id}' is not yet fully implemented")
+# Dynamically create parametrized test only if there are placeholder tools
+if PLACEHOLDER_TOOLS:
+    @pytest.mark.parametrize("tool_id", PLACEHOLDER_TOOLS)
+    def test_placeholder_tool_schemas(tool_id):
+        """Test schemas for placeholder tools (should be skipped)."""
+        pytest.skip(f"Tool '{tool_id}' is not yet fully implemented")
 
 
 def test_all_tools_have_required_attributes():

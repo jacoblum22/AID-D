@@ -15,6 +15,8 @@ import random
 import logging
 import os
 import hashlib
+import ast
+import operator
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Union, cast, Callable
 from pydantic import BaseModel, ValidationError
@@ -5112,9 +5114,23 @@ class Validator:
             old_tags = state.scene.tags.copy()
             new_tags = old_tags.copy()
 
-            if effect.add:
-                new_tags[effect.add] = effect.value or effect.note or "true"
-            if effect.remove and effect.remove in new_tags:
+            if effect.add is not None:
+                if isinstance(effect.add, dict):
+                    # Merge dict payloads - ensure all values are strings
+                    for key, value in effect.add.items():
+                        new_tags[str(key)] = str(value) if value is not None else "true"
+                elif isinstance(effect.add, str):
+                    # Handle string payloads
+                    new_tags[effect.add] = effect.value or effect.note or "true"
+                elif isinstance(effect.add, (list, tuple, set)):
+                    # Handle iterable payloads explicitly for type safety
+                    for key in effect.add:
+                        new_tags[str(key)] = effect.value or effect.note or "true"
+                else:
+                    # Fallback for other types - convert to string
+                    new_tags[str(effect.add)] = effect.value or effect.note or "true"
+            
+            if effect.remove and isinstance(effect.remove, str) and effect.remove in new_tags:
                 del new_tags[effect.remove]
 
             state.scene.tags = new_tags
@@ -5134,9 +5150,23 @@ class Validator:
             old_tags = entity.tags.copy()
             new_tags = old_tags.copy()
 
-            if effect.add:
-                new_tags[effect.add] = effect.value or effect.note or "true"
-            if effect.remove and effect.remove in new_tags:
+            if effect.add is not None:
+                if isinstance(effect.add, dict):
+                    # Merge dict payloads - ensure all values are strings
+                    for key, value in effect.add.items():
+                        new_tags[str(key)] = str(value) if value is not None else "true"
+                elif isinstance(effect.add, str):
+                    # Handle string payloads
+                    new_tags[effect.add] = effect.value or effect.note or "true"
+                elif isinstance(effect.add, (list, tuple, set)):
+                    # Handle iterable payloads explicitly for type safety
+                    for key in effect.add:
+                        new_tags[str(key)] = effect.value or effect.note or "true"
+                else:
+                    # Fallback for other types - convert to string
+                    new_tags[str(effect.add)] = effect.value or effect.note or "true"
+            
+            if effect.remove and isinstance(effect.remove, str) and effect.remove in new_tags:
                 del new_tags[effect.remove]
 
             updated_entity = entity.model_copy(update={"tags": new_tags})
@@ -5519,64 +5549,177 @@ class Validator:
 
         return reactive_effects
 
-    def _safe_eval_condition(self, condition: str, context: Dict[str, Any]) -> bool:
-        """Safely evaluate a reaction condition with limited context."""
-        # Simple condition evaluation for basic comparisons
-        # This is a simplified implementation - in production you'd want a proper expression evaluator
+    class SafeExpressionEvaluator:
+        """Safe expression evaluator that uses AST parsing to only allow safe operations."""
+        
+        # Allowed node types for safe evaluation
+        SAFE_NODES = {
+            ast.Expression, ast.Compare, ast.BoolOp, ast.UnaryOp, ast.BinOp,
+            ast.Name, ast.Load, ast.Attribute, ast.Constant,  # ast.Attribute needed for dot notation like target.guard
+            ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, 
+            ast.Gt, ast.GtE, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod
+        }
+        
+        # Allowed operators
+        OPERATORS = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.Mod: operator.mod,
+            ast.Eq: operator.eq,
+            ast.NotEq: operator.ne,
+            ast.Lt: operator.lt,
+            ast.LtE: operator.le,
+            ast.Gt: operator.gt,
+            ast.GtE: operator.ge,
+            ast.And: lambda x, y: x and y,
+            ast.Or: lambda x, y: x or y,
+            ast.Not: operator.not_,
+        }
+        
+        @classmethod
+        def is_safe_node(cls, node):
+            """Check if a node type is safe for evaluation."""
+            return type(node) in cls.SAFE_NODES
+        
+        @classmethod
+        def evaluate_safe_expression(cls, expression: str, context: Dict[str, Any]) -> bool:
+            """Safely evaluate a boolean expression using AST parsing."""
+            try:
+                # Parse the expression
+                tree = ast.parse(expression, mode='eval')
+                
+                # Check if all nodes in the tree are safe
+                for node in ast.walk(tree):
+                    if not cls.is_safe_node(node):
+                        raise ValueError(f"Unsafe node type: {type(node).__name__}")
+                
+                # Evaluate the expression
+                return cls._eval_node(tree.body, context)
+                
+            except Exception as e:
+                logging.warning(f"Safe expression evaluation failed for '{expression}': {e}")
+                return False
+        
+        @classmethod
+        def _eval_node(cls, node, context: Dict[str, Any]):
+            """Recursively evaluate an AST node."""
+            if isinstance(node, ast.Constant):
+                return node.value
+            elif isinstance(node, ast.Name):
+                # Resolve variable name from context
+                return cls._resolve_variable(node.id, context)
+            elif isinstance(node, ast.Attribute):
+                # Handle attribute access like target.guard or target.hp.current
+                obj = cls._eval_node(node.value, context)
+                attr_name = node.attr
+                if isinstance(obj, dict) and attr_name in obj:
+                    return obj[attr_name]
+                else:
+                    raise ValueError(f"Attribute '{attr_name}' not found in object")
+            elif isinstance(node, ast.Load):
+                # Load context - this is just used for variable access, no action needed
+                return None
+            elif isinstance(node, ast.Compare):
+                left = cls._eval_node(node.left, context)
+                for op, right_node in zip(node.ops, node.comparators):
+                    right = cls._eval_node(right_node, context)
+                    op_func = cls.OPERATORS.get(type(op))
+                    if not op_func:
+                        raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+                    result = op_func(left, right)
+                    if not result:
+                        return False
+                    left = right  # For chained comparisons
+                return True
+            elif isinstance(node, ast.BoolOp):
+                values = [cls._eval_node(value, context) for value in node.values]
+                if isinstance(node.op, ast.And):
+                    return all(values)
+                elif isinstance(node.op, ast.Or):
+                    return any(values)
+                else:
+                    raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
+            elif isinstance(node, ast.UnaryOp):
+                operand = cls._eval_node(node.operand, context)
+                if isinstance(node.op, ast.Not):
+                    return not operand
+                else:
+                    raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+            elif isinstance(node, ast.BinOp):
+                left = cls._eval_node(node.left, context)
+                right = cls._eval_node(node.right, context)
+                op_func = cls.OPERATORS.get(type(node.op))
+                if not op_func:
+                    raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+                return op_func(left, right)
+            else:
+                raise ValueError(f"Unsupported node type: {type(node).__name__}")
+        
+        @classmethod
+        def _resolve_variable(cls, var_name: str, context: Dict[str, Any]):
+            """Resolve a variable name from the context using dot notation."""
+            # Handle direct variable access first (for shorthand variables)
+            if var_name in context:
+                return context[var_name]
+            
+            # Handle dot notation (e.g., target.hp.current)
+            if '.' in var_name:
+                parts = var_name.split('.')
+                current = context
+                
+                for part in parts:
+                    if isinstance(current, dict) and part in current:
+                        current = current[part]
+                    else:
+                        raise ValueError(f"Variable '{var_name}' not found in context")
+                
+                return current
+            
+            # Variable not found
+            raise ValueError(f"Variable '{var_name}' not found in context")
 
+    def _safe_eval_condition(self, condition: str, context: Dict[str, Any]) -> bool:
+        """Safely evaluate a reaction condition with limited context using AST parsing."""
+        # Handle simple literal boolean values
         if condition == "True":
             return True
         elif condition == "False":
             return False
 
-        # Handle common patterns
-        if "after.hp.current" in condition and "before.hp.current" in condition:
-            # Handle both nested ({"hp": {"current": 15}}) and flat ({"hp": 15}) structures
-            after_hp = self._safe_get_nested(context["after"], "hp.current", None)
+        # Prepare context for the safe evaluator
+        eval_context = {}
+        
+        # Handle after.hp.current patterns by flattening nested structures
+        if "after" in context:
+            after_data = context["after"]
+            after_hp = self._safe_get_nested(after_data, "hp.current", None)
             if after_hp is None:
-                after_hp = context["after"].get("hp", 0)
-
-            before_hp = self._safe_get_nested(context["before"], "hp.current", None)
+                after_hp = after_data.get("hp", 0)
+            eval_context["after"] = {"hp": {"current": after_hp}}
+        
+        # Handle before.hp.current patterns
+        if "before" in context:
+            before_data = context["before"]
+            before_hp = self._safe_get_nested(before_data, "hp.current", None)
             if before_hp is None:
-                before_hp = context["before"].get("hp", 0)
+                before_hp = before_data.get("hp", 0)
+            eval_context["before"] = {"hp": {"current": before_hp}}
+        
+        # Handle effect.add patterns
+        if "effect" in context:
+            effect_data = context["effect"]
+            eval_context["effect"] = {
+                "add": effect_data.get("add")
+            }
 
-            # Replace values in condition string
-            eval_condition = condition.replace("after.hp.current", str(after_hp))
-            eval_condition = eval_condition.replace("before.hp.current", str(before_hp))
-
-            try:
-                return eval(eval_condition)
-            except Exception:
-                return False
-
-        elif "after.hp.current" in condition:
-            # Handle both nested ({"hp": {"current": 15}}) and flat ({"hp": 15}) structures
-            after_hp = self._safe_get_nested(context["after"], "hp.current", None)
-            if after_hp is None:
-                after_hp = context["after"].get("hp", 0)
-
-            eval_condition = condition.replace("after.hp.current", str(after_hp))
-
-            try:
-                return eval(eval_condition)
-            except Exception:
-                return False
-            except:
-                return False
-
-        elif "effect.add" in condition:
-            effect_add = context["effect"].get("add")
-            if effect_add is None:
-                return False
-
-            # Handle string equality checks like "effect.add == 'fear'"
-            if "==" in condition:
-                parts = condition.split("==")
-                if len(parts) == 2:
-                    expected_value = parts[1].strip().strip("'\"")
-                    return effect_add == expected_value
-
-        return False
+        # Use the safe expression evaluator
+        try:
+            return self.SafeExpressionEvaluator.evaluate_safe_expression(condition, eval_context)
+        except Exception as e:
+            logging.warning(f"Safe condition evaluation failed for '{condition}': {e}")
+            return False
 
     def _safe_get_nested(
         self, obj: Dict[str, Any], path: str, default: Any = None
@@ -5691,67 +5834,38 @@ class Validator:
     def _safe_eval_effect_condition(
         self, condition: str, context: Dict[str, Any]
     ) -> bool:
-        """Safely evaluate an effect condition with target context."""
+        """Safely evaluate an effect condition with target context using AST parsing."""
         # Handle common condition patterns
         if condition == "True":
             return True
         elif condition == "False":
             return False
 
-        # Handle target.hp.current patterns
-        if "target.hp.current" in condition:
-            target_hp = context.get("target", {}).get("hp", {}).get("current", 0)
-            eval_condition = condition.replace("target.hp.current", str(target_hp))
+        # Prepare context for the safe evaluator with both full and shorthand variable names
+        eval_context = context.copy()
+        
+        # Add shorthand aliases for convenience
+        target_data = context.get("target", {})
+        if target_data:
+            # For shorthand "hp" -> "target.hp.current" 
+            hp_current = target_data.get("hp", {}).get("current", 0)
+            eval_context["hp"] = hp_current
+            
+            # For shorthand "guard" -> "target.guard"
+            guard_value = target_data.get("guard", 0)
+            eval_context["guard"] = guard_value
 
-            try:
-                return eval(eval_condition)
-            except:
-                return False
+        # For shorthand "round" -> "scene.round"
+        scene_data = context.get("scene", {})
+        if scene_data:
+            round_value = scene_data.get("round", 1)
+            eval_context["round"] = round_value
 
-        # Handle shorthand hp patterns (e.g., "hp > 10" -> "target.hp.current > 10")
-        if "hp" in condition and "target.hp" not in condition:
-            target_hp = context.get("target", {}).get("hp", {}).get("current", 0)
-            eval_condition = condition.replace("hp", str(target_hp))
-
-            try:
-                return eval(eval_condition)
-            except:
-                return False
-
-        # Handle target.guard patterns
-        if "target.guard" in condition:
-            target_guard = context.get("target", {}).get("guard", 0)
-            eval_condition = condition.replace("target.guard", str(target_guard))
-
-            try:
-                return eval(eval_condition)
-            except:
-                return False
-
-        # Handle shorthand guard patterns (e.g., "guard > 5" -> "target.guard > 5")
-        if "guard" in condition and "target.guard" not in condition:
-            target_guard = context.get("target", {}).get("guard", 0)
-            eval_condition = condition.replace("guard", str(target_guard))
-
-            try:
-                return eval(eval_condition)
-            except:
-                return False
-
-        # Handle scene.round patterns
-        if "scene.round" in condition:
-            scene_round = context.get("scene", {}).get("round", 1)
-            eval_condition = condition.replace("scene.round", str(scene_round))
-
-            try:
-                return eval(eval_condition)
-            except:
-                return False
-
-        # Default: try literal evaluation
+        # Use the safe expression evaluator
         try:
-            return eval(condition)
-        except:
+            return self.SafeExpressionEvaluator.evaluate_safe_expression(condition, eval_context)
+        except Exception as e:
+            logging.warning(f"Safe effect condition evaluation failed for '{condition}': {e}")
             return False
 
     def _schedule_timed_effect(
