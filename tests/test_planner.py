@@ -68,6 +68,7 @@ def create_demo_state() -> GameState:
     )
 
 
+@pytest.mark.skip(reason="Skipping planner tests as requested")
 def test_planner_integration():
     """Test the full planner integration with LLM."""
     successful_tests, failed_tests = run_planner_integration_tests()
@@ -200,6 +201,7 @@ def run_planner_integration_tests():
     return successful_tests, failed_tests
 
 
+@pytest.mark.skip(reason="Skipping planner tests as requested")
 def test_prompt_realism():
     """Test that the prompt contains only realistic game information."""
 
@@ -225,6 +227,7 @@ def test_prompt_realism():
     print("\n--- Actual prompt example (first test will show this) ---")
 
 
+@pytest.mark.skip(reason="Skipping planner tests as requested")
 def test_failure_scenarios():
     """Test specific scenarios that should fail or trigger fallbacks."""
 

@@ -3,20 +3,18 @@ Core data structures for the AI D&D game state and utterances.
 """
 
 import re
-from typing import Dict, List, Optional, Any, Union, Literal, Annotated, cast
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+import sys
+import os
+from typing import Dict, List, Optional, Any, Union, Literal, Annotated, cast, Tuple
+from pydantic import BaseModel, ConfigDict, Field, model_validator, PrivateAttr
 from enum import Enum
 
+# Add project root to path for models import - more robust approach
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
-class Meta(BaseModel):
-    """Metadata for system-level management (not gameplay state)."""
-
-    created_at: Optional[str] = None  # ISO timestamp
-    last_changed_at: Optional[str] = None
-    visibility: Literal["public", "hidden", "gm_only"] = "public"
-    source: Optional[str] = None  # e.g., "manual", "generator", "import"
-    notes: Optional[str] = None
-    extra: Dict[str, Any] = Field(default_factory=dict)
+from models.meta import Meta
 
 
 class EffectLogEntry(BaseModel):
@@ -98,6 +96,22 @@ class Zone(BaseModel):
     blocked_exits: List[str] = Field(
         default_factory=list
     )  # Optional list of blocked adjacent zones
+    meta: Meta = Field(default_factory=Meta)
+
+
+class Clock(BaseModel):
+    """Represents a game clock/progress tracker."""
+
+    id: str
+    name: str
+    value: int = 0
+    maximum: int = 4
+    minimum: int = 0
+    source: Optional[str] = None
+    created_turn: Optional[int] = None
+    last_modified_turn: Optional[int] = None
+    last_modified_by: Optional[str] = None
+    filled_this_turn: bool = False
     meta: Meta = Field(default_factory=Meta)
 
 
@@ -287,9 +301,14 @@ class GameState(BaseModel):
     pending_action: Optional[str] = None
     current_actor: Optional[str] = None
     turn_flags: Dict[str, Any] = Field(default_factory=dict)
-    clocks: Dict[str, Dict[str, Any]] = Field(
+    clocks: Dict[str, Union[Clock, Dict[str, Any]]] = Field(
         default_factory=dict
-    )  # Enhanced with meta support
+    )  # Support both Clock objects and legacy dict format
+
+    # Redaction caching for performance optimization
+    _redaction_cache: Dict[Tuple[Optional[str], str], Dict[str, Any]] = PrivateAttr(
+        default_factory=dict
+    )
 
     # Backward compatibility property
     @property
@@ -298,15 +317,472 @@ class GameState(BaseModel):
         filtered = {k: v for k, v in self.entities.items() if v.type in ("pc", "npc")}
         return cast(Dict[str, Union[PC, NPC]], filtered)
 
+    def get_state(
+        self,
+        pov_id: Optional[str] = None,
+        slice: Optional[Dict[str, Any]] = None,
+        redact: bool = True,
+        use_cache: bool = True,
+        role: Literal["player", "narrator", "gm"] = "player",
+    ) -> Dict[str, Any]:
+        """
+        Get the current game state, optionally redacted for a specific point of view.
 
-def is_clock_visible_to(clock_data: Dict[str, Any]) -> bool:
+        Args:
+            pov_id: The point-of-view actor ID, or None for GM view
+            slice: Optional slice specification for partial state
+            redact: Whether to apply redaction based on visibility rules
+            use_cache: Whether to use redaction cache for performance
+            role: The redaction role determining information access level
+
+        Returns:
+            Dictionary representing the game state
+        """
+        # Import here to avoid circular imports
+        from .visibility import redact_entity, redact_zone, redact_clock
+
+        state = {
+            "scene": self.scene.model_dump() if not redact else self.scene.model_dump(),
+            "zones": {},
+            "entities": {},
+            "clocks": {},
+        }
+
+        # Handle zones
+        for zid, zone in self.zones.items():
+            if redact:
+                state["zones"][zid] = redact_zone(pov_id, zone, self, role)
+            else:
+                zone_data = zone.model_dump()
+                zone_data["is_visible"] = True
+                state["zones"][zid] = zone_data
+
+        # Handle entities
+        for eid, entity in self.entities.items():
+            if redact:
+                if use_cache and role == "player":  # Only cache player view for now
+                    state["entities"][eid] = self.get_cached_view(pov_id, eid)
+                else:
+                    state["entities"][eid] = redact_entity(pov_id, entity, self, role)
+            else:
+                entity_data = entity.model_dump()
+                entity_data["is_visible"] = True
+                state["entities"][eid] = entity_data
+
+        # Handle clocks
+        for cid, clock in self.clocks.items():
+            if redact:
+                if isinstance(clock, Clock):
+                    state["clocks"][cid] = redact_clock(pov_id, clock)
+                else:
+                    # Legacy dict format - use old redaction logic
+                    state["clocks"][cid] = self._redact_legacy_clock(pov_id, cid, clock)
+            else:
+                if isinstance(clock, Clock):
+                    clock_data = clock.model_dump()
+                    clock_data["is_visible"] = True
+                    state["clocks"][cid] = clock_data
+                else:
+                    clock_data = clock.copy()
+                    clock_data["is_visible"] = True
+                    state["clocks"][cid] = clock_data
+
+        # Apply slice filtering if provided
+        if slice:
+            # Simple slice implementation - can be enhanced later
+            if "entities" in slice and isinstance(slice["entities"], list):
+                state["entities"] = {
+                    k: v for k, v in state["entities"].items() if k in slice["entities"]
+                }
+
+        return state
+
+    def list_visible_entities(self, pov_id: str, zone_only: bool = True) -> List[str]:
+        """
+        List entity IDs visible to the specified point of view.
+
+        Args:
+            pov_id: The point-of-view actor ID
+            zone_only: If True, only return entities in the same zone as the POV actor
+
+        Returns:
+            List of visible entity IDs
+        """
+        # Import here to avoid circular imports
+        from .visibility import can_player_see
+
+        pov = self.entities.get(pov_id)
+        if not pov:
+            return []
+
+        visible = []
+        for eid, entity in self.entities.items():
+            if zone_only and getattr(entity, "current_zone", None) != getattr(
+                pov, "current_zone", None
+            ):
+                continue
+            if can_player_see(pov_id, entity, self):
+                visible.append(eid)
+
+        return visible
+
+    def get_cached_view(self, pov_id: Optional[str], eid: str) -> Dict[str, Any]:
+        """
+        Get a cached redacted view of an entity, computing it if not cached.
+
+        Args:
+            pov_id: The point-of-view actor ID, or None for GM view
+            eid: The entity ID to get a redacted view for
+
+        Returns:
+            Cached redacted view of the entity
+        """
+        key = (pov_id, eid)
+        if key not in self._redaction_cache:
+            # Import here to avoid circular imports
+            from .visibility import redact_entity
+
+            entity = self.entities.get(eid)
+            if entity:
+                self._redaction_cache[key] = redact_entity(pov_id, entity, self)
+            else:
+                # Return a "not found" redacted view
+                self._redaction_cache[key] = {
+                    "id": eid,
+                    "type": "unknown",
+                    "is_visible": False,
+                    "name": "Not Found",
+                }
+
+        return self._redaction_cache[key]
+
+    def invalidate_cache(self, eid: Optional[str] = None) -> None:
+        """
+        Invalidate redaction cache entries.
+
+        Args:
+            eid: If provided, only invalidate cache for this entity.
+                 If None, clear the entire cache.
+        """
+        if eid:
+            # Remove all cache entries for this entity
+            self._redaction_cache = {
+                k: v for k, v in self._redaction_cache.items() if k[1] != eid
+            }
+        else:
+            # Clear entire cache
+            self._redaction_cache.clear()
+
+        # Publish cache invalidation event using deferred import
+        try:
+            import importlib
+
+            # Try import paths in order of preference (tests use router.events via path modification)
+            events_module = None
+            for module_path in ["router.events", "backend.router.events"]:
+                try:
+                    events_module = importlib.import_module(module_path)
+                    break
+                except ImportError:
+                    continue
+
+            if (
+                events_module
+                and hasattr(events_module, "publish")
+                and hasattr(events_module, "EventTypes")
+            ):
+                events_module.publish(
+                    events_module.EventTypes.CACHE_INVALIDATED,
+                    {
+                        "entity_id": eid,
+                        "cache_size_before": len(self._redaction_cache),
+                        "full_clear": eid is None,
+                    },
+                )
+
+        except (ImportError, AttributeError, Exception):
+            # Event system not available or failed, continue silently
+            pass
+
+    def validate_invariants(self) -> List[str]:
+        """
+        Validate game state invariants and return list of errors.
+
+        Returns:
+            List of error messages for any invariant violations
+        """
+        errors = []
+
+        # Check Meta field consistency across all objects
+        for eid, entity in self.entities.items():
+            try:
+                # This will trigger the model_validator
+                entity.meta.model_validate(entity.meta.model_dump())
+            except ValueError as e:
+                errors.append(f"Entity {eid}: {str(e)}")
+
+        for zid, zone in self.zones.items():
+            try:
+                zone.meta.model_validate(zone.meta.model_dump())
+            except ValueError as e:
+                errors.append(f"Zone {zid}: {str(e)}")
+
+        for cid, clock in self.clocks.items():
+            if isinstance(clock, Clock):
+                try:
+                    clock.meta.model_validate(clock.meta.model_dump())
+                except ValueError as e:
+                    errors.append(f"Clock {cid}: {str(e)}")
+
+        # Check scene meta if it has one
+        if hasattr(self.scene, "meta") and self.scene.meta:
+            try:
+                self.scene.meta.model_validate(self.scene.meta.model_dump())
+            except ValueError as e:
+                errors.append(f"Scene {self.scene.id}: {str(e)}")
+
+        return errors
+
+    def export_state(
+        self,
+        mode: Literal["full", "public", "minimal", "save", "session"] = "full",
+        pov_id: Optional[str] = None,
+        role: Literal["player", "narrator", "gm"] = "gm",
+        include_known_by: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export game state with different serialization policies for various contexts.
+
+        Args:
+            mode: Export mode determining level of detail
+                - "full": Complete state (for debugging/GM tools)
+                - "public": Public-safe state (for sharing/logs)
+                - "minimal": Core state only (for storage efficiency)
+                - "save": Persistent state for save files
+                - "session": Runtime state for session management
+            pov_id: Point of view for redaction (if None, uses role-appropriate view)
+            role: Redaction role for information access level
+            include_known_by: Override known_by inclusion in meta (None=auto based on mode)
+
+        Returns:
+            Dictionary with game state in requested format
+        """
+        # Determine redaction settings based on mode
+        apply_redaction = mode == "public" or (mode == "session" and role != "gm")
+
+        state = {
+            "scene": self._export_scene(mode, include_known_by),
+            "zones": {},
+            "entities": {},
+            "clocks": {},
+        }
+
+        # Handle zones
+        for zid, zone in self.zones.items():
+            if apply_redaction:
+                from .visibility import redact_zone
+
+                redacted_zone = redact_zone(pov_id, zone, self, role)
+                # Apply meta export policy to redacted zone
+                if "meta" in redacted_zone:
+                    redacted_zone["meta"] = zone.meta.export(mode, include_known_by)
+                state["zones"][zid] = redacted_zone
+            else:
+                zone_data = zone.model_dump()
+                zone_data["meta"] = zone.meta.export(mode, include_known_by)
+                state["zones"][zid] = zone_data
+
+        # Handle entities
+        for eid, entity in self.entities.items():
+            if apply_redaction:
+                from .visibility import redact_entity
+
+                # For public mode, use a real entity ID if pov_id is None
+                effective_pov_id = pov_id
+                if mode == "public" and pov_id is None:
+                    # Find first PC entity as default POV for public exports
+                    pc_entities = [
+                        e_id
+                        for e_id, e in self.entities.items()
+                        if getattr(e, "type", None) == "pc"
+                    ]
+                    effective_pov_id = (
+                        pc_entities[0]
+                        if pc_entities
+                        else list(self.entities.keys())[0] if self.entities else None
+                    )
+
+                redacted_entity = redact_entity(effective_pov_id, entity, self, role)
+
+                # For public mode, completely exclude non-visible entities
+                if mode == "public" and not redacted_entity.get("is_visible", False):
+                    continue
+
+                # Apply meta export policy if entity has meta
+                if "meta" in redacted_entity:
+                    redacted_entity["meta"] = entity.meta.export(mode, include_known_by)
+                state["entities"][eid] = redacted_entity
+            else:
+                entity_data = entity.model_dump()
+                entity_data["meta"] = entity.meta.export(mode, include_known_by)
+                state["entities"][eid] = entity_data
+
+        # Handle clocks
+        for cid, clock in self.clocks.items():
+            if isinstance(clock, Clock):
+                if apply_redaction:
+                    from .visibility import redact_clock
+
+                    redacted_clock = redact_clock(pov_id, clock)
+                    if "meta" in redacted_clock:
+                        redacted_clock["meta"] = clock.meta.export(
+                            mode, include_known_by
+                        )
+                    state["clocks"][cid] = redacted_clock
+                else:
+                    clock_data = clock.model_dump()
+                    clock_data["meta"] = clock.meta.export(mode, include_known_by)
+                    state["clocks"][cid] = clock_data
+            else:
+                # Legacy format - preserve as-is
+                state["clocks"][cid] = (
+                    clock.copy() if isinstance(clock, dict) else clock
+                )
+
+        return state
+
+    def _export_scene(
+        self,
+        mode: Literal["full", "public", "minimal", "save", "session"],
+        include_known_by: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export scene with appropriate meta serialization policy.
+
+        Args:
+            mode: Export mode
+            include_known_by: Whether to include known_by in meta
+
+        Returns:
+            Scene data with exported meta
+        """
+        scene_data = self.scene.model_dump()
+
+        # Export scene meta if it exists
+        if hasattr(self.scene, "meta") and self.scene.meta:
+            scene_data["meta"] = self.scene.meta.export(mode, include_known_by)
+
+        return scene_data
+
+    def to_save_format(self, include_runtime_data: bool = False) -> Dict[str, Any]:
+        """
+        Export game state for save files - persistent data only.
+
+        Args:
+            include_runtime_data: Whether to include runtime-only data like known_by
+
+        Returns:
+            Dictionary suitable for save files
+        """
+        return self.export_state(
+            mode="save",
+            role="gm",  # GM view for complete data
+            include_known_by=include_runtime_data,
+        )
+
+    def to_session_format(self, pov_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Export game state for session management - includes runtime data.
+
+        Args:
+            pov_id: Point of view for redaction
+
+        Returns:
+            Dictionary suitable for session management
+        """
+        return self.export_state(
+            mode="session", pov_id=pov_id, role="player" if pov_id else "gm"
+        )
+
+    def to_public_format(
+        self,
+        pov_id: Optional[str] = None,
+        role: Literal["player", "narrator", "gm"] = "player",
+    ) -> Dict[str, Any]:
+        """
+        Export game state for public sharing - excludes sensitive data.
+
+        Args:
+            pov_id: Point of view for redaction
+            role: Redaction role
+
+        Returns:
+            Dictionary suitable for public sharing
+        """
+        return self.export_state(
+            mode="public",
+            pov_id=pov_id,
+            role=role,
+            include_known_by=False,  # Never include known_by in public format
+        )
+
+    def to_minimal_format(self) -> Dict[str, Any]:
+        """
+        Export game state in minimal format - core data only.
+
+        Returns:
+            Dictionary with minimal data set
+        """
+        return self.export_state(mode="minimal", role="gm", include_known_by=False)
+
+    def _redact_legacy_clock(
+        self, pov_id: Optional[str], clock_id: str, clock_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Redact legacy clock dictionary format for backward compatibility.
+        """
+        from copy import deepcopy
+
+        # Check clock visibility using existing logic
+        meta = clock_data.get("meta", {})
+        if meta.get("visibility") == "gm_only":
+            return {"id": clock_id, "value": None, "max": None, "is_visible": False}
+        if meta.get("visibility") == "hidden":
+            if pov_id not in meta.get("known_by", set()):
+                return {"id": clock_id, "value": None, "max": None, "is_visible": False}
+
+        # Return visible clock data
+        safe_clock = deepcopy(clock_data)
+        safe_clock["id"] = clock_id
+        safe_clock["is_visible"] = True
+
+        # Strip GM notes
+        if "meta" in safe_clock:
+            safe_clock["meta"]["notes"] = None
+
+        return safe_clock
+
+
+def is_clock_visible_to(
+    clock: Union[Clock, Dict[str, Any]], pov_id: Optional[str] = None
+) -> bool:
     """Check if a clock is visible to the given actor."""
-    # Check for meta.visibility in clock data
-    meta = clock_data.get("meta", {})
-    if meta.get("visibility") == "gm_only":
-        return False
-    if meta.get("visibility") == "hidden":
-        return False
+    # Handle both Clock objects and legacy dict format
+    if isinstance(clock, Clock):
+        if clock.meta.visibility == "gm_only":
+            return False
+        if clock.meta.visibility == "hidden":
+            # Hidden clocks are only visible to actors who know about them
+            return pov_id in clock.meta.known_by if pov_id else False
+    else:
+        # Legacy dict format
+        meta = clock.get("meta", {})
+        if meta.get("visibility") == "gm_only":
+            return False
+        if meta.get("visibility") == "hidden":
+            # Hidden clocks are only visible to actors who know about them
+            known_by = meta.get("known_by", set())
+            return pov_id in known_by if pov_id else False
     return True
 
 
