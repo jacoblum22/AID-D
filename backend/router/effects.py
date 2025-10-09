@@ -60,9 +60,11 @@ def apply_position(state: GameState, e: Dict[str, Any]) -> None:
     """Change an entity's position/zone."""
     target_id = e["target"]
     to_zone = e["to"]
+    from_zone = e.get("from")
 
     if target_id in state.entities and to_zone in state.zones:
         entity: Entity = state.entities[target_id]
+        old_zone = getattr(entity, "current_zone", None)
 
         # Update position using Pydantic's copy mechanism
         updated_entity = entity.model_copy(update={"current_zone": to_zone})
@@ -70,6 +72,21 @@ def apply_position(state: GameState, e: Dict[str, Any]) -> None:
 
         # Update visibility for all actors
         _update_visibility(state)
+
+        # Trigger auto-reveal for exploration
+        if entity.type in ("pc", "npc") and old_zone != to_zone:
+            from .auto_reveal import trigger_exploration_events
+
+            try:
+                trigger_exploration_events(state, target_id, old_zone, to_zone)
+            except Exception as ex:
+                # Auto-reveal is optional - core movement should work even if it fails
+                import sys
+
+                print(
+                    f"Warning: Auto-reveal failed during movement: {ex}",
+                    file=sys.stderr,
+                )
 
 
 @effect("clock")
@@ -97,6 +114,15 @@ def apply_clock(state: GameState, e: Dict[str, Any]) -> None:
         }
 
     clock = state.clocks[clock_id]
+
+    # Handle Clock objects vs legacy dicts
+    if not isinstance(clock, dict):
+        # Convert Clock object to dict for legacy processing
+        clock_dict = clock.model_dump()
+        clock_dict["min"] = 0  # Set default min for legacy compatibility
+        # Update the state with the dict version
+        state.clocks[clock_id] = clock_dict
+        clock = clock_dict
 
     # Migrate legacy clocks to enhanced structure if needed
     if "min" not in clock:

@@ -8,6 +8,7 @@ detail levels, error conditions, and edge cases as specified.
 import sys
 import os
 import pytest
+from pydantic import ValidationError
 
 # Add the backend directory to Python path
 sys.path.insert(
@@ -851,6 +852,7 @@ class TestMetaSystem:
         """Test setting custom meta values."""
         meta = Meta(
             visibility="gm_only",
+            gm_only=True,  # Must be consistent with visibility
             created_at="2025-10-04T21:00:00Z",
             source="manual",
             notes="Test entity",
@@ -871,7 +873,7 @@ class TestMetaSystem:
             id="pc.test",
             name="Test PC",
             current_zone="test",
-            meta=Meta(visibility="gm_only", notes="Secret character"),
+            meta=Meta(visibility="gm_only", gm_only=True, notes="Secret character"),
         )
 
         # Test model_dump (new Pydantic method)
@@ -906,7 +908,7 @@ class TestPerceptionGuards:
                 name="Secret Room",
                 description="A hidden room.",
                 adjacent_zones=["public_room"],
-                meta=Meta(visibility="gm_only"),
+                meta=Meta(visibility="gm_only", gm_only=True),
             ),
         }
 
@@ -946,7 +948,7 @@ class TestPerceptionGuards:
                 current_zone="public_room",
                 hp=HP(current=25, max=25),
                 visible_actors=["pc.player"],
-                meta=Meta(visibility="gm_only"),
+                meta=Meta(visibility="gm_only", gm_only=True),
             ),
         }
 
@@ -1116,7 +1118,7 @@ class TestPerceptionGuards:
             id="pc.gm",
             name="GM Only",
             current_zone="test",
-            meta=Meta(visibility="gm_only"),
+            meta=Meta(visibility="gm_only", gm_only=True),
         )
 
         assert is_visible_to(visible_entity) is True
@@ -1136,7 +1138,7 @@ class TestPerceptionGuards:
             name="Secret",
             description="",
             adjacent_zones=[],
-            meta=Meta(visibility="gm_only"),
+            meta=Meta(visibility="gm_only", gm_only=True),
         )
 
         assert is_zone_visible_to(visible_zone) is True
@@ -2581,3 +2583,48 @@ class TestRefsStructure:
         # Empty sections should be removed
         for section in refs.values():
             assert len(section) > 0  # No empty sections
+
+
+class TestGMOnlyConsistency:
+    """Test gm_only consistency requirements."""
+
+    def test_gm_only_validation_enforces_consistency(self, get_info_state):
+        """Test that Meta validation enforces gm_only consistency."""
+        # Test that inconsistent fields are rejected by validation
+        with pytest.raises(ValidationError, match="Inconsistent gm_only flag"):
+            Meta(visibility="gm_only", gm_only=False)
+
+        # Test that consistent fields are accepted
+        consistent_meta = Meta(visibility="gm_only", gm_only=True)
+        assert consistent_meta.visibility == "gm_only"
+        assert consistent_meta.gm_only is True
+
+    def test_backward_compatibility_gm_only_requires_both_fields(self, get_info_state):
+        """Test that both visibility and gm_only must be explicitly set for gm_only entities."""
+        # Test that validation requires explicit gm_only=True when visibility="gm_only"
+        with pytest.raises(ValidationError, match="Inconsistent gm_only flag"):
+            Meta(visibility="gm_only")  # Missing explicit gm_only=True
+
+        # Test that providing both fields works correctly
+        meta = Meta(visibility="gm_only", gm_only=True)
+        assert meta.gm_only is True
+        assert meta.visibility == "gm_only"
+
+    def test_gm_only_consistency_validation(self, get_info_state):
+        """Test that both fields should ideally be consistent."""
+        # Properly consistent GM-only entity
+        consistent_item = ItemEntity(
+            id="item.secret",
+            name="Secret Item",
+            type="item",
+            current_zone="tavern",
+            meta=Meta(visibility="gm_only", gm_only=True),  # Consistent
+        )
+        get_info_state.entities["item.secret"] = consistent_item
+
+        # Should behave as expected
+        from backend.router.visibility import can_player_see
+
+        assert can_player_see("pc.arin", consistent_item, get_info_state) is False
+        assert consistent_item.meta.gm_only is True
+        assert consistent_item.meta.visibility == "gm_only"
