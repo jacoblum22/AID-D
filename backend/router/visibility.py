@@ -18,7 +18,11 @@ RedactionRole = Literal["player", "narrator", "gm"]
 
 def can_player_see(pov_id: Optional[str], entity: BaseEntity, world: GameState) -> bool:
     """
-    Return True if pov_id can perceive this entity.
+    Pure visibility check. Does NOT cause discovery.
+    
+    Returns True only if the POV already knows the entity or it is public/visible 
+    in current conditions. Hidden entities remain invisible until an explicit 
+    reveal event.
 
     Args:
         pov_id: The point-of-view actor ID, or None for GM view

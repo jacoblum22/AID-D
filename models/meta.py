@@ -171,7 +171,7 @@ class Meta(BaseModel):
 
         # Conditional fields based on mode
         if include_known_by:
-            result["known_by"] = list(
+            result["known_by"] = sorted(
                 self.known_by
             )  # Convert set to list for JSON, include even if empty
         elif "known_by_count" in fields:

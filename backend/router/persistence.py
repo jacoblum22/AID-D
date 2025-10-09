@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Literal, Union, List
 from datetime import datetime, timezone
 
-from backend.router.game_state import GameState, PC, NPC, Zone, Scene, Clock
+from backend.router.game_state import GameState, PC, NPC, ObjectEntity, ItemEntity, Zone, Scene, Clock
 from models.meta import Meta
 
 
@@ -429,6 +429,10 @@ class PersistenceManager:
                 entities[eid] = PC(**clean_data)
             elif entity_type == "npc":
                 entities[eid] = NPC(**clean_data)
+            elif entity_type == "object":
+                entities[eid] = ObjectEntity(**clean_data)
+            elif entity_type == "item":
+                entities[eid] = ItemEntity(**clean_data)
             else:
                 # For unknown types, try NPC as fallback
                 try:

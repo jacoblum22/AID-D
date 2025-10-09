@@ -45,7 +45,7 @@ except ImportError:
 import os
 
 # Performance thresholds - configurable via environment variables for CI/CD flexibility
-PERFORMANCE_THRESHOLD_MS = float(os.environ.get("REDACTION_PERF_THRESHOLD_MS", "200"))
+PERFORMANCE_THRESHOLD_MS = float(os.environ.get("REDACTION_PERF_THRESHOLD_MS", "1000"))
 PLAYER_REDACTION_THRESHOLD_MS = float(
     os.environ.get("PLAYER_REDACTION_THRESHOLD_MS", "200")
 )

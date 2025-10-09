@@ -60,6 +60,10 @@ def _check_discovery_eligibility(
 ) -> bool:
     """
     Check if an observer can discover a target entity.
+    
+    Determines if a hidden target *could* be discovered under current conditions.
+    Hidden entities require explicit triggers (perception, light, etc.).
+    Zone proximity alone is insufficient; see reveal_on_event handlers.
 
     Args:
         state: Current game state
