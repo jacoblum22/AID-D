@@ -238,7 +238,9 @@ class TestRedactionCaching:
         cached_time = time.perf_counter() - start
 
         # Cached should be faster or at least not slower
-        assert cached_time <= uncached_time, f"Cached time {cached_time:.3f}s should not be slower than uncached {uncached_time:.3f}s"
+        assert (
+            cached_time <= uncached_time
+        ), f"Cached time {cached_time:.3f}s should not be slower than uncached {uncached_time:.3f}s"
 
 
 class TestCacheInvalidationHooks:
