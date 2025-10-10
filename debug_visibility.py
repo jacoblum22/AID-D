@@ -18,13 +18,11 @@ npc_secret = NPC(
 )
 
 # Create simple game state
+tavern_zone = Zone(id="tavern", name="Tavern", description="A tavern")
+
 game_state = GameState(
     entities={"npc.secret": npc_secret},
-    zones={
-        "tavern": Zone(
-            id="tavern", name="Tavern", description="A tavern", adjacent_zones=[]
-        )
-    },
+    zones={"tavern": tavern_zone},
     scene=Scene(id="test"),
 )
 

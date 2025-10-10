@@ -581,8 +581,14 @@ class TestMoveEnhancements:
 
     def test_blocked_exits_validation(self, move_state):
         """Test that blocked exits are properly rejected."""
-        # Add blocked_exits to courtyard zone
-        move_state.zones["courtyard"].blocked_exits = ["hall"]
+        # Block the exit from courtyard to hall using new Exit system
+        courtyard = move_state.zones["courtyard"]
+        hall_exit = courtyard.get_exit("hall")
+        if hall_exit:
+            hall_exit.blocked = True
+        else:
+            # If no exit exists, add a blocked one
+            courtyard.add_exit("hall", blocked=True)
 
         args = {"actor": "pc.arin", "to": "hall", "method": "walk"}
         utterance = Utterance(text="I go to hall", actor_id="pc.arin")
@@ -590,7 +596,10 @@ class TestMoveEnhancements:
 
         assert result.ok == False
         assert result.tool_id == "ask_clarifying"
-        assert "blocked" in result.args["question"].lower()
+        assert (
+            "blocked" in result.args["question"].lower()
+            or "requires" in result.args["question"].lower()
+        )
         assert result.facts["cause"] == "blocked"
         assert result.facts["destination"] == "hall"
 

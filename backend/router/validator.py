@@ -35,6 +35,12 @@ from .game_state import (
     is_zone_visible_to,
     is_clock_visible_to,
 )
+from .zone_graph import (
+    is_adjacent,
+    describe_exits,
+    is_exit_usable,
+    get_zone as get_zone_graph,
+)
 from .tool_catalog import TOOL_CATALOG, get_tool_by_id, Effect
 from .effects import apply_effects
 
@@ -984,36 +990,60 @@ class Validator:
                 narration_hint={},
             )
 
-        # Validation: Target zone is adjacent (unless ignore_adjacency is true)
-        if not ignore_adjacency and to_zone not in current_zone.adjacent_zones:
-            valid_exits = [
-                state.zones[zone_id].name
-                for zone_id in current_zone.adjacent_zones
-                if zone_id in state.zones
-            ]
-            exits_text = ", ".join(valid_exits) if valid_exits else "nowhere"
-            return ToolResult(
-                ok=False,
-                tool_id="ask_clarifying",
-                args={
-                    "question": f"You can't move there from {current_zone.name}. Valid exits: {exits_text}."
-                },
-                facts={"cause": "invalid", "valid_exits": valid_exits},
-                effects=[],
-                narration_hint={},
-            )
+        # Validation: Check if exit exists first, then check usability
+        target_exit = (
+            current_zone.get_exit(to_zone)
+            if hasattr(current_zone, "get_exit")
+            else None
+        )
 
-        # Validation: Path not blocked
-        blocked_exits = getattr(current_zone, "blocked_exits", [])
-        if to_zone in blocked_exits:
-            return ToolResult(
-                ok=False,
-                tool_id="ask_clarifying",
-                args={"question": f"The path to {target_zone.name} is blocked."},
-                facts={"cause": "blocked", "destination": to_zone},
-                effects=[],
-                narration_hint={},
-            )
+        if target_exit:
+            # Exit exists, check if it's usable
+            is_usable, reason = is_exit_usable(target_exit, actor_entity, state)
+            if not is_usable:
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={"question": f"The path to {target_zone.name} is {reason}."},
+                    facts={
+                        "cause": "blocked",
+                        "destination": to_zone,
+                        "reason": reason,
+                    },
+                    effects=[],
+                    narration_hint={},
+                )
+        else:
+            # No exit exists - check if this should be considered invalid adjacency
+            if not ignore_adjacency:
+                # Check legacy blocked_exits for backwards compatibility
+                blocked_exits = getattr(current_zone, "blocked_exits", [])
+                if to_zone in blocked_exits:
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_clarifying",
+                        args={
+                            "question": f"The path to {target_zone.name} is blocked."
+                        },
+                        facts={"cause": "blocked", "destination": to_zone},
+                        effects=[],
+                        narration_hint={},
+                    )
+
+                # No exit exists at all - show valid exits
+                valid_exit_descriptions = describe_exits(current_zone, state)
+                valid_exits = [desc["target_name"] for desc in valid_exit_descriptions]
+                exits_text = ", ".join(valid_exits) if valid_exits else "nowhere"
+                return ToolResult(
+                    ok=False,
+                    tool_id="ask_clarifying",
+                    args={
+                        "question": f"You can't move there from {current_zone.name}. Valid exits: {exits_text}."
+                    },
+                    facts={"cause": "invalid", "valid_exits": valid_exits},
+                    effects=[],
+                    narration_hint={},
+                )
 
         # Special handling for sneak method
         if method == "sneak":
@@ -3608,13 +3638,25 @@ class Validator:
         for clock_id in clock_ids:
             if clock_id in state.clocks:
                 clock_data = state.clocks[clock_id]
-                refs["clocks"][clock_id] = {
-                    "id": clock_id,
-                    "value": clock_data["value"],
-                    "max": clock_data.get("max", 10),
-                    "min": clock_data.get("min", 0),
-                    "source": clock_data.get("source", "unknown"),
-                }
+                # Handle both Clock objects and dictionary formats
+                from .game_state import Clock
+
+                if isinstance(clock_data, Clock):
+                    refs["clocks"][clock_id] = {
+                        "id": clock_id,
+                        "value": clock_data.value,
+                        "max": clock_data.maximum,
+                        "min": clock_data.minimum,
+                        "source": clock_data.source or "unknown",
+                    }
+                else:
+                    refs["clocks"][clock_id] = {
+                        "id": clock_id,
+                        "value": clock_data["value"],
+                        "max": clock_data.get("max", 10),
+                        "min": clock_data.get("min", 0),
+                        "source": clock_data.get("source", "unknown"),
+                    }
 
         # Find and extract relationship references
         if "relationships" in facts and isinstance(facts["relationships"], dict):
@@ -4054,29 +4096,53 @@ class Validator:
         for clock_id in paginated_clock_ids:
             clock_data = state.clocks[clock_id]
             if is_clock_visible_to(clock_data):
-                clock_info = {
-                    "id": clock_id,  # Include ID for consistency
-                    "value": clock_data["value"],
-                    "max": clock_data.get("max", 10),
-                    "min": clock_data.get("min", 0),
-                }
+                # Handle both Clock objects and dictionary formats
+                from .game_state import Clock
 
-                if detail_level == "full":
-                    clock_info.update(
-                        {
-                            "source": clock_data.get("source", "unknown"),
-                            "created_turn": clock_data.get("created_turn", 0),
-                            "last_modified_turn": clock_data.get(
-                                "last_modified_turn", 0
-                            ),
-                            "last_modified_by": clock_data.get(
-                                "last_modified_by", "unknown"
-                            ),
-                            "filled_this_turn": clock_data.get(
-                                "filled_this_turn", False
-                            ),
-                        }
-                    )
+                if isinstance(clock_data, Clock):
+                    clock_info = {
+                        "id": clock_id,  # Include ID for consistency
+                        "value": clock_data.value,
+                        "max": clock_data.maximum,
+                        "min": clock_data.minimum,
+                    }
+
+                    if detail_level == "full":
+                        clock_info.update(
+                            {
+                                "source": clock_data.source or "unknown",
+                                "created_turn": clock_data.created_turn or 0,
+                                "last_modified_turn": clock_data.last_modified_turn
+                                or 0,
+                                "last_modified_by": clock_data.last_modified_by
+                                or "unknown",
+                                "filled_this_turn": clock_data.filled_this_turn,
+                            }
+                        )
+                else:
+                    clock_info = {
+                        "id": clock_id,  # Include ID for consistency
+                        "value": clock_data["value"],
+                        "max": clock_data.get("max", 10),
+                        "min": clock_data.get("min", 0),
+                    }
+
+                    if detail_level == "full":
+                        clock_info.update(
+                            {
+                                "source": clock_data.get("source", "unknown"),
+                                "created_turn": clock_data.get("created_turn", 0),
+                                "last_modified_turn": clock_data.get(
+                                    "last_modified_turn", 0
+                                ),
+                                "last_modified_by": clock_data.get(
+                                    "last_modified_by", "unknown"
+                                ),
+                                "filled_this_turn": clock_data.get(
+                                    "filled_this_turn", False
+                                ),
+                            }
+                        )
 
                 visible_clocks[clock_id] = clock_info
             else:
@@ -5062,7 +5128,20 @@ class Validator:
             }
 
         clock = state.clocks[clock_id]
-        old_value = clock["value"]
+
+        # Handle both Clock objects and dictionary formats
+        from .game_state import Clock
+
+        if isinstance(clock, Clock):
+            # Clock object - use attribute access
+            old_value = clock.value
+            max_value = clock.maximum
+            min_value = clock.minimum
+        else:
+            # Dictionary format - use dictionary access
+            old_value = clock["value"]
+            max_value = clock.get("max", 10)
+            min_value = clock.get("min", 0)
 
         # Handle dice expressions in delta field
         dice_log = []
@@ -5084,11 +5163,19 @@ class Validator:
         else:
             delta = 0
 
-        new_value = max(0, min(clock.get("max", 10), old_value + delta))
+        new_value = max(min_value, min(max_value, old_value + delta))
 
-        clock["value"] = new_value
-        clock["last_modified_turn"] = state.scene.round
-        clock["last_modified_by"] = effect.source or "unknown"
+        # Update clock based on its type
+        if isinstance(clock, Clock):
+            # Clock object - use attribute assignment
+            clock.value = new_value
+            clock.last_modified_turn = state.scene.round
+            clock.last_modified_by = effect.source or "unknown"
+        else:
+            # Dictionary format - use dictionary assignment
+            clock["value"] = new_value
+            clock["last_modified_turn"] = state.scene.round
+            clock["last_modified_by"] = effect.source or "unknown"
 
         return self._create_enhanced_log_entry(
             effect=effect,
@@ -5129,8 +5216,12 @@ class Validator:
                 else:
                     # Fallback for other types - convert to string
                     new_tags[str(effect.add)] = effect.value or effect.note or "true"
-            
-            if effect.remove and isinstance(effect.remove, str) and effect.remove in new_tags:
+
+            if (
+                effect.remove
+                and isinstance(effect.remove, str)
+                and effect.remove in new_tags
+            ):
                 del new_tags[effect.remove]
 
             state.scene.tags = new_tags
@@ -5165,8 +5256,12 @@ class Validator:
                 else:
                     # Fallback for other types - convert to string
                     new_tags[str(effect.add)] = effect.value or effect.note or "true"
-            
-            if effect.remove and isinstance(effect.remove, str) and effect.remove in new_tags:
+
+            if (
+                effect.remove
+                and isinstance(effect.remove, str)
+                and effect.remove in new_tags
+            ):
                 del new_tags[effect.remove]
 
             updated_entity = entity.model_copy(update={"tags": new_tags})
@@ -5551,15 +5646,34 @@ class Validator:
 
     class SafeExpressionEvaluator:
         """Safe expression evaluator that uses AST parsing to only allow safe operations."""
-        
+
         # Allowed node types for safe evaluation
         SAFE_NODES = {
-            ast.Expression, ast.Compare, ast.BoolOp, ast.UnaryOp, ast.BinOp,
-            ast.Name, ast.Load, ast.Attribute, ast.Constant,  # ast.Attribute needed for dot notation like target.guard
-            ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE, 
-            ast.Gt, ast.GtE, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod
+            ast.Expression,
+            ast.Compare,
+            ast.BoolOp,
+            ast.UnaryOp,
+            ast.BinOp,
+            ast.Name,
+            ast.Load,
+            ast.Attribute,
+            ast.Constant,  # ast.Attribute needed for dot notation like target.guard
+            ast.And,
+            ast.Or,
+            ast.Not,
+            ast.Eq,
+            ast.NotEq,
+            ast.Lt,
+            ast.LtE,
+            ast.Gt,
+            ast.GtE,
+            ast.Add,
+            ast.Sub,
+            ast.Mult,
+            ast.Div,
+            ast.Mod,
         }
-        
+
         # Allowed operators
         OPERATORS = {
             ast.Add: operator.add,
@@ -5577,31 +5691,35 @@ class Validator:
             ast.Or: lambda x, y: x or y,
             ast.Not: operator.not_,
         }
-        
+
         @classmethod
         def is_safe_node(cls, node):
             """Check if a node type is safe for evaluation."""
             return type(node) in cls.SAFE_NODES
-        
+
         @classmethod
-        def evaluate_safe_expression(cls, expression: str, context: Dict[str, Any]) -> bool:
+        def evaluate_safe_expression(
+            cls, expression: str, context: Dict[str, Any]
+        ) -> bool:
             """Safely evaluate a boolean expression using AST parsing."""
             try:
                 # Parse the expression
-                tree = ast.parse(expression, mode='eval')
-                
+                tree = ast.parse(expression, mode="eval")
+
                 # Check if all nodes in the tree are safe
                 for node in ast.walk(tree):
                     if not cls.is_safe_node(node):
                         raise ValueError(f"Unsafe node type: {type(node).__name__}")
-                
+
                 # Evaluate the expression
                 return cls._eval_node(tree.body, context)
-                
+
             except Exception as e:
-                logging.warning(f"Safe expression evaluation failed for '{expression}': {e}")
+                logging.warning(
+                    f"Safe expression evaluation failed for '{expression}': {e}"
+                )
                 return False
-        
+
         @classmethod
         def _eval_node(cls, node, context: Dict[str, Any]):
             """Recursively evaluate an AST node."""
@@ -5627,7 +5745,9 @@ class Validator:
                     right = cls._eval_node(right_node, context)
                     op_func = cls.OPERATORS.get(type(op))
                     if not op_func:
-                        raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+                        raise ValueError(
+                            f"Unsupported comparison operator: {type(op).__name__}"
+                        )
                     result = op_func(left, right)
                     if not result:
                         return False
@@ -5640,43 +5760,49 @@ class Validator:
                 elif isinstance(node.op, ast.Or):
                     return any(values)
                 else:
-                    raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
+                    raise ValueError(
+                        f"Unsupported boolean operator: {type(node.op).__name__}"
+                    )
             elif isinstance(node, ast.UnaryOp):
                 operand = cls._eval_node(node.operand, context)
                 if isinstance(node.op, ast.Not):
                     return not operand
                 else:
-                    raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+                    raise ValueError(
+                        f"Unsupported unary operator: {type(node.op).__name__}"
+                    )
             elif isinstance(node, ast.BinOp):
                 left = cls._eval_node(node.left, context)
                 right = cls._eval_node(node.right, context)
                 op_func = cls.OPERATORS.get(type(node.op))
                 if not op_func:
-                    raise ValueError(f"Unsupported binary operator: {type(node.op).__name__}")
+                    raise ValueError(
+                        f"Unsupported binary operator: {type(node.op).__name__}"
+                    )
                 return op_func(left, right)
             else:
                 raise ValueError(f"Unsupported node type: {type(node).__name__}")
-        
+
         @classmethod
         def _resolve_variable(cls, var_name: str, context: Dict[str, Any]):
             """Resolve a variable name from the context using dot notation."""
             # Handle direct variable access first (for shorthand variables)
             if var_name in context:
                 return context[var_name]
-            
+
             # Handle dot notation (e.g., target.hp.current)
-            if '.' in var_name:
-                parts = var_name.split('.')
+            if "." in var_name:
+                parts = var_name.split(".")
                 current = context
-                
+
                 for part in parts:
                     if isinstance(current, dict) and part in current:
                         current = current[part]
                     else:
                         raise ValueError(f"Variable '{var_name}' not found in context")
-                
+
                 return current
-            
+
             # Variable not found
             raise ValueError(f"Variable '{var_name}' not found in context")
 
@@ -5690,7 +5816,7 @@ class Validator:
 
         # Prepare context for the safe evaluator
         eval_context = {}
-        
+
         # Handle after.hp.current patterns by flattening nested structures
         if "after" in context:
             after_data = context["after"]
@@ -5698,7 +5824,7 @@ class Validator:
             if after_hp is None:
                 after_hp = after_data.get("hp", 0)
             eval_context["after"] = {"hp": {"current": after_hp}}
-        
+
         # Handle before.hp.current patterns
         if "before" in context:
             before_data = context["before"]
@@ -5706,17 +5832,17 @@ class Validator:
             if before_hp is None:
                 before_hp = before_data.get("hp", 0)
             eval_context["before"] = {"hp": {"current": before_hp}}
-        
+
         # Handle effect.add patterns
         if "effect" in context:
             effect_data = context["effect"]
-            eval_context["effect"] = {
-                "add": effect_data.get("add")
-            }
+            eval_context["effect"] = {"add": effect_data.get("add")}
 
         # Use the safe expression evaluator
         try:
-            return self.SafeExpressionEvaluator.evaluate_safe_expression(condition, eval_context)
+            return self.SafeExpressionEvaluator.evaluate_safe_expression(
+                condition, eval_context
+            )
         except Exception as e:
             logging.warning(f"Safe condition evaluation failed for '{condition}': {e}")
             return False
@@ -5843,14 +5969,14 @@ class Validator:
 
         # Prepare context for the safe evaluator with both full and shorthand variable names
         eval_context = context.copy()
-        
+
         # Add shorthand aliases for convenience
         target_data = context.get("target", {})
         if target_data:
-            # For shorthand "hp" -> "target.hp.current" 
+            # For shorthand "hp" -> "target.hp.current"
             hp_current = target_data.get("hp", {}).get("current", 0)
             eval_context["hp"] = hp_current
-            
+
             # For shorthand "guard" -> "target.guard"
             guard_value = target_data.get("guard", 0)
             eval_context["guard"] = guard_value
@@ -5863,9 +5989,13 @@ class Validator:
 
         # Use the safe expression evaluator
         try:
-            return self.SafeExpressionEvaluator.evaluate_safe_expression(condition, eval_context)
+            return self.SafeExpressionEvaluator.evaluate_safe_expression(
+                condition, eval_context
+            )
         except Exception as e:
-            logging.warning(f"Safe effect condition evaluation failed for '{condition}': {e}")
+            logging.warning(
+                f"Safe effect condition evaluation failed for '{condition}': {e}"
+            )
             return False
 
     def _schedule_timed_effect(
@@ -6522,7 +6652,16 @@ class Validator:
             summary.update(state.turn_flags)
 
         if hasattr(state, "clocks"):
-            summary["clocks"] = {k: v["value"] for k, v in state.clocks.items()}
+            # Handle both Clock objects and dictionary formats
+            from .game_state import Clock
+
+            clock_values = {}
+            for k, v in state.clocks.items():
+                if isinstance(v, Clock):
+                    clock_values[k] = v.value
+                else:
+                    clock_values[k] = v["value"]
+            summary["clocks"] = clock_values
 
         if state.current_actor and state.current_actor in state.actors:
             current_actor = state.actors[state.current_actor]

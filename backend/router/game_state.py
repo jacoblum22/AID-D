@@ -5,9 +5,21 @@ Core data structures for the AI D&D game state and utterances.
 import re
 import sys
 import os
-from typing import Dict, List, Optional, Any, Union, Literal, Annotated, cast, Tuple
+from typing import (
+    Dict,
+    List,
+    Optional,
+    Any,
+    Union,
+    Literal,
+    Annotated,
+    cast,
+    Tuple,
+    Callable,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator, PrivateAttr
 from enum import Enum
+import warnings
 
 # Add project root to path for models import - more robust approach
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -15,6 +27,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from models.meta import Meta
+from models.space import Zone as ZoneModel, Exit
 
 
 class EffectLogEntry(BaseModel):
@@ -86,17 +99,111 @@ class PendingEffect(BaseModel):
     meta: Dict[str, Any] = Field(default_factory=dict)  # Additional metadata
 
 
-class Zone(BaseModel):
-    """Represents a game zone/location."""
+class Zone(ZoneModel):
+    """
+    Backwards-compatible Zone wrapper extending models/space.Zone.
 
-    id: str
-    name: str
-    description: str
-    adjacent_zones: List[str]
-    blocked_exits: List[str] = Field(
-        default_factory=list
-    )  # Optional list of blocked adjacent zones
-    meta: Meta = Field(default_factory=Meta)
+    Provides legacy adjacent_zones and blocked_exits properties for compatibility
+    while using the new Exit-based model internally.
+    """
+
+    def __init__(
+        self,
+        id: str,
+        name: str,
+        description: Optional[str] = None,
+        adjacent_zones: Optional[List[str]] = None,
+        blocked_exits: Optional[List[str]] = None,
+        exits: Optional[List[Union[dict, Exit]]] = None,
+        tags: Optional[Union[set, List[str]]] = None,
+        meta: Optional[Meta] = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Initialize Zone with backward compatibility for legacy parameters.
+
+        Args:
+            id: Zone ID
+            name: Zone name
+            description: Zone description
+            adjacent_zones: Legacy parameter - list of connected zone IDs
+            blocked_exits: Legacy parameter - list of blocked zone IDs
+            exits: New parameter - list of Exit objects or dicts
+            tags: Set of zone tags
+            meta: Zone metadata
+            **kwargs: Additional parameters
+        """
+        # Handle legacy format conversion
+        if adjacent_zones is not None and exits is None:
+            exits = []
+            blocked_set = set(blocked_exits or [])
+
+            # Create exits for all adjacent zones
+            for zone_id in adjacent_zones:
+                exits.append({"to": zone_id, "blocked": zone_id in blocked_set})
+
+            # Add any blocked-only exits (shouldn't normally happen but be safe)
+            for zone_id in blocked_set:
+                if zone_id not in adjacent_zones:
+                    exits.append({"to": zone_id, "blocked": True})
+
+        # Convert tags to set if it's a list
+        if isinstance(tags, list):
+            tag_set = set(tags)
+        else:
+            tag_set = tags or set()
+
+        # Convert exit dicts to Exit objects if needed
+        if exits:
+            exit_objects = []
+            for exit in exits:
+                if isinstance(exit, dict):
+                    exit_objects.append(Exit(**exit))
+                else:
+                    exit_objects.append(exit)
+        else:
+            exit_objects = []
+
+        # Initialize with converted or provided exits
+        super().__init__(
+            id=id,
+            name=name,
+            description=description,
+            exits=exit_objects,
+            tags=tag_set,  # tag_set will be converted to set by validator if needed
+            meta=meta or Meta(),
+            **kwargs,
+        )
+
+    @property
+    def adjacent_zones(self) -> List[str]:
+        """
+        Legacy compatibility property derived from exits.
+
+        Returns:
+            List of zone IDs that have unblocked exits
+        """
+        return [exit.to for exit in self.exits if not exit.blocked]
+
+    @property
+    def blocked_exits(self) -> List[str]:
+        """
+        Legacy compatibility property derived from exits.
+
+        Returns:
+            List of zone IDs that have blocked exits
+        """
+        return [exit.to for exit in self.exits if exit.blocked]
+
+    def model_dump_json_safe(self, mode="save", **kwargs):
+        """
+        Ensure Zone has model_dump_json_safe method available.
+
+        This method should be inherited from ZoneModel, but we're adding it
+        explicitly to handle any inheritance issues.
+        """
+        # Call the parent class method
+        return super().model_dump_json_safe(mode=mode, **kwargs)
 
 
 class Clock(BaseModel):
@@ -143,6 +250,27 @@ class BaseEntity(BaseModel):
     current_zone: str
     tags: Dict[str, Any] = Field(default_factory=dict)  # Support for arbitrary tags
     meta: Meta = Field(default_factory=Meta)
+
+    def model_dump_json_safe(
+        self,
+        mode: Literal["full", "public", "minimal", "save", "session"] = "full",
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Export Entity data with JSON-safe serialization (handles Meta sets).
+
+        Args:
+            mode: Export mode for Meta fields (full, save, public, etc.)
+            **kwargs: Additional arguments passed to model_dump
+
+        Returns:
+            Dictionary with meta.known_by as list instead of set
+        """
+        data = self.model_dump(**kwargs)
+        # Use meta's export method for JSON-safe serialization
+        if "meta" in data:
+            data["meta"] = self.meta.export(mode=mode)
+        return data
 
 
 class PC(BaseEntity):
@@ -309,6 +437,9 @@ class GameState(BaseModel):
     _redaction_cache: Dict[Tuple[Optional[str], str], Dict[str, Any]] = PrivateAttr(
         default_factory=dict
     )
+
+    # Event system for zone graph and other dynamic changes
+    _event_listeners: Dict[str, List[Callable]] = PrivateAttr(default_factory=dict)
 
     # Backward compatibility property
     @property
@@ -588,7 +719,7 @@ class GameState(BaseModel):
                     redacted_zone["meta"] = zone.meta.export(mode, include_known_by)
                 state["zones"][zid] = redacted_zone
             else:
-                zone_data = zone.model_dump()
+                zone_data = zone.model_dump_json_safe()
                 zone_data["meta"] = zone.meta.export(mode, include_known_by)
                 state["zones"][zid] = zone_data
 
@@ -761,6 +892,70 @@ class GameState(BaseModel):
             safe_clock["meta"]["notes"] = None
 
         return safe_clock
+
+    # =============================================================================
+    # Event System for Dynamic Zone Changes
+    # =============================================================================
+
+    def register_event_listener(self, event_type: str, listener: Callable) -> None:
+        """
+        Register an event listener for a specific event type.
+
+        Args:
+            event_type: Type of event to listen for (e.g., "zone_graph.exit_blocked")
+            listener: Function to call when event occurs
+        """
+        if event_type not in self._event_listeners:
+            self._event_listeners[event_type] = []
+        self._event_listeners[event_type].append(listener)
+
+    def unregister_event_listener(self, event_type: str, listener: Callable) -> bool:
+        """
+        Unregister an event listener.
+
+        Args:
+            event_type: Type of event to stop listening for
+            listener: Function to remove
+
+        Returns:
+            True if listener was found and removed
+        """
+        if event_type in self._event_listeners:
+            try:
+                self._event_listeners[event_type].remove(listener)
+                return True
+            except ValueError:
+                pass
+        return False
+
+    def emit(self, event_type: str, **event_data) -> None:
+        """
+        Emit an event to all registered listeners.
+
+        Args:
+            event_type: Type of event being emitted
+            **event_data: Event-specific data to pass to listeners
+        """
+        if event_type in self._event_listeners:
+            for listener in self._event_listeners[event_type]:
+                try:
+                    listener(event_type=event_type, world=self, **event_data)
+                except Exception as e:
+                    # Log error but don't break event processing
+                    # In a real system you'd use proper logging here
+                    print(f"Error in event listener for {event_type}: {e}")
+
+    def get_event_listeners(self, event_type: str) -> List[Callable]:
+        """
+        Get all listeners for a specific event type.
+
+        Args:
+            event_type: Event type to get listeners for
+
+        Returns:
+            List of listener functions
+        """
+        return self._event_listeners.get(event_type, [])
 
 
 def is_clock_visible_to(

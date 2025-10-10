@@ -9,6 +9,7 @@ import importlib
 from typing import Dict, Set, List, Optional, Any, Tuple
 from .game_state import GameState, PC, NPC
 from .visibility import can_player_see
+from .zone_graph import get_zone, is_adjacent, get_adjacent_zones
 
 
 def _safe_entity_update(state: GameState, entity_id: str, discoverer_id: str) -> bool:
