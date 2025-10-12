@@ -229,9 +229,20 @@ def redact_zone(
         result["is_visible"] = True
         return result
 
-    # Check zone visibility
-    vis = zone.meta.visibility != "gm_only"
-    if not vis:
+    # Check zone visibility - GM-only zones are never visible
+    if zone.meta.visibility == "gm_only":
+        return {
+            "id": zone.id,
+            "name": "Unknown Area",
+            "description": "You cannot see this area.",
+            "adjacent_zones": [],
+            "blocked_exits": [],
+            "entities": [],
+            "is_visible": False,
+        }
+
+    # Hidden zones are only visible to those who know about them
+    if zone.meta.visibility == "hidden" and pov_id not in zone.meta.known_by:
         return {
             "id": zone.id,
             "name": "Unknown Area",

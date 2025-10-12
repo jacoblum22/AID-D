@@ -1030,20 +1030,28 @@ class Validator:
                         narration_hint={},
                     )
 
-                # No exit exists at all - show valid exits
-                valid_exit_descriptions = describe_exits(current_zone, state)
-                valid_exits = [desc["target_name"] for desc in valid_exit_descriptions]
-                exits_text = ", ".join(valid_exits) if valid_exits else "nowhere"
-                return ToolResult(
-                    ok=False,
-                    tool_id="ask_clarifying",
-                    args={
-                        "question": f"You can't move there from {current_zone.name}. Valid exits: {exits_text}."
-                    },
-                    facts={"cause": "invalid", "valid_exits": valid_exits},
-                    effects=[],
-                    narration_hint={},
-                )
+                # Check legacy adjacent_zones for backwards compatibility
+                adjacent_zones = getattr(current_zone, "adjacent_zones", set())
+                if to_zone in adjacent_zones:
+                    # Legacy adjacency allows the move - proceed without exit-specific messaging
+                    pass  # Continue to movement execution below
+                else:
+                    # No exit exists and not in adjacent_zones - show valid exits
+                    valid_exit_descriptions = describe_exits(current_zone, state)
+                    valid_exits = [
+                        desc["target_name"] for desc in valid_exit_descriptions
+                    ]
+                    exits_text = ", ".join(valid_exits) if valid_exits else "nowhere"
+                    return ToolResult(
+                        ok=False,
+                        tool_id="ask_clarifying",
+                        args={
+                            "question": f"You can't move there from {current_zone.name}. Valid exits: {exits_text}."
+                        },
+                        facts={"cause": "invalid", "valid_exits": valid_exits},
+                        effects=[],
+                        narration_hint={},
+                    )
 
         # Special handling for sneak method
         if method == "sneak":

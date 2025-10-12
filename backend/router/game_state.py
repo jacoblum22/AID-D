@@ -719,7 +719,7 @@ class GameState(BaseModel):
                     redacted_zone["meta"] = zone.meta.export(mode, include_known_by)
                 state["zones"][zid] = redacted_zone
             else:
-                zone_data = zone.model_dump_json_safe()
+                zone_data = zone.model_dump_json_safe(mode=mode)
                 zone_data["meta"] = zone.meta.export(mode, include_known_by)
                 state["zones"][zid] = zone_data
 
