@@ -3661,8 +3661,9 @@ class Validator:
                     refs["clocks"][clock_id] = {
                         "id": clock_id,
                         "value": clock_data["value"],
-                        "max": clock_data.get("max", 10),
-                        "min": clock_data.get("min", 0),
+                        # Handle both legacy (maximum/minimum) and modern (max/min) key styles
+                        "max": clock_data.get("max", clock_data.get("maximum", 10)),
+                        "min": clock_data.get("min", clock_data.get("minimum", 0)),
                         "source": clock_data.get("source", "unknown"),
                     }
 
@@ -4131,8 +4132,9 @@ class Validator:
                     clock_info = {
                         "id": clock_id,  # Include ID for consistency
                         "value": clock_data["value"],
-                        "max": clock_data.get("max", 10),
-                        "min": clock_data.get("min", 0),
+                        # Handle both legacy (maximum/minimum) and modern (max/min) key styles
+                        "max": clock_data.get("max", clock_data.get("maximum", 10)),
+                        "min": clock_data.get("min", clock_data.get("minimum", 0)),
                     }
 
                     if detail_level == "full":
@@ -5148,8 +5150,9 @@ class Validator:
         else:
             # Dictionary format - use dictionary access
             old_value = clock["value"]
-            max_value = clock.get("max", 10)
-            min_value = clock.get("min", 0)
+            # Handle both legacy (maximum/minimum) and modern (max/min) key styles
+            max_value = clock.get("max", clock.get("maximum", 10))
+            min_value = clock.get("min", clock.get("minimum", 0))
 
         # Handle dice expressions in delta field
         dice_log = []

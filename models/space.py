@@ -474,7 +474,9 @@ def create_zone_from_legacy(
     zone = Zone(id=id, name=name, description=description, **kwargs)
 
     # Convert adjacent_zones to Exit objects only if no explicit exits were provided
-    if adjacent_zones and "exits" not in kwargs:
+    # Check both for missing key and None value (common in legacy payload unpacking)
+    exits_value = kwargs.get("exits")
+    if adjacent_zones and exits_value is None:
         blocked_set = set(blocked_exits or [])
         for zone_id in adjacent_zones:
             zone.add_exit(to=zone_id, blocked=zone_id in blocked_set)

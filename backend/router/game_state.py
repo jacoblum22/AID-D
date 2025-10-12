@@ -937,7 +937,8 @@ class GameState(BaseModel):
             **event_data: Event-specific data to pass to listeners
         """
         if event_type in self._event_listeners:
-            for listener in self._event_listeners[event_type]:
+            # Iterate over a snapshot to prevent modifications during dispatch from disrupting delivery
+            for listener in list(self._event_listeners[event_type]):
                 try:
                     listener(event_type=event_type, world=self, **event_data)
                 except Exception as e:
