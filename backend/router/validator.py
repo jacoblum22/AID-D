@@ -5228,9 +5228,9 @@ class Validator:
 
             if effect.add is not None:
                 if isinstance(effect.add, dict):
-                    # Merge dict payloads - ensure all values are strings
+                    # Merge dict payloads - normalize keys but preserve value types
                     for key, value in effect.add.items():
-                        new_tags[str(key)] = str(value) if value is not None else "true"
+                        new_tags[str(key)] = value if value is not None else "true"
                 elif isinstance(effect.add, str):
                     # Handle string payloads
                     new_tags[effect.add] = effect.value or effect.note or "true"
@@ -5268,9 +5268,9 @@ class Validator:
 
             if effect.add is not None:
                 if isinstance(effect.add, dict):
-                    # Merge dict payloads - ensure all values are strings
+                    # Merge dict payloads - normalize keys but preserve value types
                     for key, value in effect.add.items():
-                        new_tags[str(key)] = str(value) if value is not None else "true"
+                        new_tags[str(key)] = value if value is not None else "true"
                 elif isinstance(effect.add, str):
                     # Handle string payloads
                     new_tags[effect.add] = effect.value or effect.note or "true"
