@@ -84,8 +84,13 @@ def redact_entity(
     """
     # GM role sees everything unredacted
     if role == "gm":
-        result = entity.model_dump()
+        result = entity.model_dump_json_safe(mode="full")
         result["is_visible"] = True
+
+        # Ensure schema consistency for GM view - always include notes field
+        if "meta" in result and "notes" not in result["meta"]:
+            result["meta"]["notes"] = None
+
         return result
 
     # Check basic visibility
@@ -185,7 +190,7 @@ def redact_entity(
         return redacted
 
     # Fully visible copy - apply role-based policies
-    safe = deepcopy(entity.model_dump())
+    safe = deepcopy(entity.model_dump_json_safe(mode="full"))
     safe["is_visible"] = True
 
     # Apply role-based redaction policies
@@ -220,13 +225,24 @@ def redact_zone(
     """
     # GM role sees everything
     if role == "gm":
-        result = zone.model_dump()
+        result = zone.model_dump_json_safe(mode="full")
         result["is_visible"] = True
         return result
 
-    # Check zone visibility
-    vis = zone.meta.visibility != "gm_only"
-    if not vis:
+    # Check zone visibility - GM-only zones are never visible
+    if zone.meta.visibility == "gm_only":
+        return {
+            "id": zone.id,
+            "name": "Unknown Area",
+            "description": "You cannot see this area.",
+            "adjacent_zones": [],
+            "blocked_exits": [],
+            "entities": [],
+            "is_visible": False,
+        }
+
+    # Hidden zones are only visible to those who know about them
+    if zone.meta.visibility == "hidden" and pov_id not in zone.meta.known_by:
         return {
             "id": zone.id,
             "name": "Unknown Area",
@@ -246,7 +262,7 @@ def redact_zone(
             visible_entities.append(eid)
 
     # Return redacted zone info
-    zone_data = zone.model_dump()
+    zone_data = zone.model_dump_json_safe(mode="public")
     zone_data["entities"] = visible_entities
     zone_data["is_visible"] = True
 
