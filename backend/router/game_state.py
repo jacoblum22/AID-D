@@ -19,7 +19,6 @@ from typing import (
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator, PrivateAttr
 from enum import Enum
-import warnings
 
 # Add project root to path for models import - more robust approach
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

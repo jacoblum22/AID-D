@@ -1016,8 +1016,20 @@ class Validator:
         else:
             # No exit exists - check if this should be considered invalid adjacency
             if not ignore_adjacency:
+                # Helper function to get zone properties from both Zone objects and dict-backed zones
+                def get_zone_property(zone, prop_name, default):
+                    """Get property from Zone object (attribute) or dict-backed zone (key)."""
+                    if hasattr(zone, prop_name):
+                        # Zone object - use attribute access
+                        return getattr(zone, prop_name, default)
+                    elif isinstance(zone, dict):
+                        # Dict-backed zone - use key access
+                        return zone.get(prop_name, default)
+                    else:
+                        return default
+
                 # Check legacy blocked_exits for backwards compatibility
-                blocked_exits = getattr(current_zone, "blocked_exits", [])
+                blocked_exits = get_zone_property(current_zone, "blocked_exits", [])
                 if to_zone in blocked_exits:
                     return ToolResult(
                         ok=False,
@@ -1031,7 +1043,9 @@ class Validator:
                     )
 
                 # Check legacy adjacent_zones for backwards compatibility
-                adjacent_zones = getattr(current_zone, "adjacent_zones", set())
+                adjacent_zones = get_zone_property(
+                    current_zone, "adjacent_zones", set()
+                )
                 if to_zone in adjacent_zones:
                     # Legacy adjacency allows the move - proceed without exit-specific messaging
                     pass  # Continue to movement execution below
