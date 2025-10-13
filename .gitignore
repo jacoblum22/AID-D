@@ -31,6 +31,17 @@ temp/
 tmp/
 *.tmp
 
+# Game Session Files and User-Generated Content
+session_state.json
+interrupted_session.json
+*_session.json
+*_save.json
+saves/
+game_saves/
+player_data/
+custom_worlds/
+user_*.json
+
 # OS generated files
 .DS_Store
 .DS_Store?

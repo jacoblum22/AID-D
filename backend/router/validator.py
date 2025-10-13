@@ -644,7 +644,7 @@ class Validator:
     def _execute_ask_roll(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute ask_roll tool - Style+Domain dice mechanics."""
+        """Execute ask_roll tool - Style+Domain dice mechanics with enhanced roll progression."""
         random.seed(seed)
 
         # Extract arguments
@@ -692,6 +692,27 @@ class Validator:
         # Apply advantage/disadvantage to style dice count
         effective_style = max(0, min(3, style + adv_style_delta))
 
+        # Create roll setup information for dramatic presentation
+        actor_name = (
+            "You"
+            if actor == state.current_actor
+            else state.entities[actor].name if actor in state.entities else "Unknown"
+        )
+        roll_description = f"{actor_name} attempt{'' if actor == state.current_actor else 's'} to {action}"
+        if target:
+            target_name = (
+                state.entities[target].name if target in state.entities else target
+            )
+            roll_description += f" against {target_name}"
+
+        roll_setup = {
+            "description": roll_description,
+            "dc": dc,
+            "style_dice_count": effective_style,
+            "domain": domain,
+            "action": action,
+        }
+
         # Roll dice: d20 + sum(effective_style × domain dice)
         d20_roll = random.randint(1, 20)
 
@@ -736,9 +757,10 @@ class Validator:
             outcome, action, actor, target, zone_target, state
         )
 
-        # Create detailed narration hint
+        # Create detailed narration hint with roll progression
         narration_hint = {
             "summary": f"{action.capitalize()} {self._outcome_to_text(outcome)}",
+            "roll_setup": roll_setup,  # Information for pre-roll display
             "dice": {
                 "d20": d20_roll,
                 "style": style_dice,
@@ -751,6 +773,7 @@ class Validator:
             "outcome": outcome,
             "tone_tags": self._get_tone_tags(outcome, action),
             "salient_entities": [actor] + ([target] if target else []),
+            "roll_progression": True,  # Flag to indicate this needs roll presentation
         }
 
         return ToolResult(
@@ -3992,6 +4015,27 @@ class Validator:
             else:
                 summary = f"{zone.name} appears empty"
 
+        # Add exit information to the summary since users often ask about exits
+        if zone.adjacent_zones:
+            zone_names = []
+            for adj_zone_id in zone.adjacent_zones[:3]:  # Limit to first 3
+                adj_zone = state.zones.get(adj_zone_id)
+                if adj_zone:
+                    zone_names.append(adj_zone.name)
+                else:
+                    zone_names.append(adj_zone_id)
+
+            if zone_names:
+                if len(zone_names) == 1:
+                    summary += f". From here you can reach {zone_names[0]}"
+                elif len(zone_names) == 2:
+                    summary += (
+                        f". From here you can reach {zone_names[0]} and {zone_names[1]}"
+                    )
+                else:
+                    exits_text = ", ".join(zone_names[:-1]) + f", and {zone_names[-1]}"
+                    summary += f". From here you can reach {exits_text}"
+
         # Apply field filtering
         facts = self._filter_fields(facts, fields)
 
@@ -4460,6 +4504,10 @@ class Validator:
             topic = "look around"
 
         if topic == "look around":
+            # Build description with entities and exits
+            description_parts = [f"You survey {zone_name}."]
+
+            # Add entities if present
             if visible_entities:
                 entity_names = []
                 for entity_id in visible_entities[:2]:  # Limit to first 2 entities
@@ -4471,11 +4519,46 @@ class Validator:
 
                 entities_text = " and ".join(entity_names) if entity_names else ""
                 if entities_text:
-                    return f"You survey {zone_name}. {entities_text} can be seen here."
-                else:
-                    return f"You survey {zone_name}."
-            else:
-                return f"You survey {zone_name}. The area appears quiet."
+                    description_parts.append(f"{entities_text} can be seen here.")
+
+            # Add exits if available
+            if current_zone and hasattr(current_zone, "exits") and current_zone.exits:
+                exit_descriptions = []
+                for exit in current_zone.exits[:3]:  # Limit to first 3 exits
+                    if hasattr(exit, "label") and hasattr(exit, "direction"):
+                        exit_descriptions.append(
+                            f"{exit.label} to the {exit.direction}"
+                        )
+                    elif hasattr(exit, "direction"):
+                        exit_descriptions.append(f"a passage to the {exit.direction}")
+                    elif hasattr(exit, "to"):
+                        # Fallback to destination zone name if available
+                        dest_zone = state.zones.get(exit.to)
+                        if dest_zone and hasattr(dest_zone, "name"):
+                            exit_descriptions.append(f"a path to {dest_zone.name}")
+                        else:
+                            exit_descriptions.append("a way out")
+
+                if exit_descriptions:
+                    if len(exit_descriptions) == 1:
+                        description_parts.append(f"You notice {exit_descriptions[0]}.")
+                    elif len(exit_descriptions) == 2:
+                        description_parts.append(
+                            f"You notice {exit_descriptions[0]} and {exit_descriptions[1]}."
+                        )
+                    else:
+                        exits_text = (
+                            ", ".join(exit_descriptions[:-1])
+                            + f", and {exit_descriptions[-1]}"
+                        )
+                        description_parts.append(f"You notice {exits_text}.")
+
+            # Join all parts
+            return (
+                " ".join(description_parts)
+                if description_parts
+                else f"You survey {zone_name}."
+            )
 
         elif topic == "listen":
             if scene_tags.get("noise") == "loud":

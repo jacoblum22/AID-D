@@ -1,0 +1,73 @@
+# Stealth Outcome Resolution Table
+# Maps stealth roll outcomes to fictional consequences and mechanical effects
+
+# Outcome bands: crit_success, success, partial, fail
+# Each outcome can have multiple variants for variety
+
+stealth:
+  crit_success:
+    - description: "Perfect stealth — no one notices. You gain advantage on your next action."
+      effects:
+        - type: "tag"
+          target: "{actor}"
+          add: {"advantaged": True}
+          duration: 1
+      tone_tags: ["stealth", "masterful", "confident"]
+      
+    - description: "Like a shadow, you move unseen and unheard, positioning yourself perfectly."
+      effects:
+        - type: "tag"
+          target: "{actor}"
+          add: {"positioned": True}
+      tone_tags: ["stealth", "masterful", "tactical"]
+
+  success:
+    - description: "You remain unseen, moving quietly through the shadows."
+      effects: []
+      tone_tags: ["stealth", "careful", "successful"]
+      
+    - description: "Your careful movements go unnoticed. You're exactly where you want to be."
+      effects: []
+      tone_tags: ["stealth", "careful", "successful"]
+
+  partial:
+    - description: "You make some noise but manage to stay hidden. Nearby enemies become more alert."
+      effects:
+        - type: "clock"
+          id: "scene.alert"
+          delta: 1
+        - type: "tag"
+          target: "scene"
+          add: {"noise": "quiet"}
+      tone_tags: ["stealth", "tense", "close"]
+      
+    - description: "A loose stone shifts under your foot, but you freeze before anyone investigates."
+      effects:
+        - type: "clock"
+          id: "scene.tension"
+          delta: 1
+      tone_tags: ["stealth", "tense", "close"]
+
+  fail:
+    - description: "Your boot scrapes loudly against stone. Heads turn in your direction!"
+      effects:
+        - type: "clock"
+          id: "scene.alarm"
+          delta: 2
+        - type: "tag"
+          target: "{actor}"
+          add: {"exposed": True}
+        - type: "tag"
+          target: "scene"
+          add: {"noise": "loud"}
+      tone_tags: ["stealth", "failure", "urgent"]
+      
+    - description: "You stumble into something that clatters to the ground. All nearby enemies are now alert!"
+      effects:
+        - type: "clock"
+          id: "scene.alarm"
+          delta: 3
+        - type: "tag"
+          target: "{actor}"
+          add: {"exposed": True}
+      tone_tags: ["stealth", "failure", "urgent"]

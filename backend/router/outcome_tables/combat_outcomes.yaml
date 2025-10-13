@@ -1,0 +1,90 @@
+# Combat Outcome Resolution Table
+# Maps combat roll outcomes to fictional consequences and tactical effects  
+
+# Actions: attack, shove, grapple, etc.
+# Each outcome affects positioning, momentum, and battle state
+
+combat:
+  crit_success:
+    - description: "A devastating strike! Your attack finds the perfect opening."
+      effects:
+        - type: "damage"
+          target: "{target}"
+          amount: "double"
+        - type: "tag"
+          target: "{actor}"
+          add: {"momentum": True}
+        - type: "tag"
+          target: "{target}"
+          add: {"staggered": True}
+      tone_tags: ["combat", "devastating", "masterful"]
+      
+    - description: "Perfect technique! Your strike is both precise and powerful."
+      effects:
+        - type: "damage"
+          target: "{target}"
+          amount: "double"
+        - type: "tag"
+          target: "{actor}"
+          add: {"advantaged": True}
+          duration: 1
+      tone_tags: ["combat", "precise", "masterful"]
+
+  success:
+    - description: "Your attack connects solidly, dealing good damage."
+      effects:
+        - type: "damage"
+          target: "{target}"
+          amount: "normal"
+      tone_tags: ["combat", "solid", "effective"]
+      
+    - description: "A clean hit! Your weapon finds its mark."
+      effects:
+        - type: "damage"
+          target: "{target}"
+          amount: "normal"
+      tone_tags: ["combat", "clean", "successful"]
+
+  partial:
+    - description: "A glancing blow that still manages to hurt your opponent."
+      effects:
+        - type: "damage"
+          target: "{target}"
+          amount: "reduced"
+        - type: "tag"
+          target: "{target}"
+          add: {"off_balance": True}
+          duration: 1
+      tone_tags: ["combat", "glancing", "partial"]
+      
+    - description: "You clip them as they try to dodge, but it's not a full hit."
+      effects:
+        - type: "damage"
+          target: "{target}"
+          amount: "reduced"
+      tone_tags: ["combat", "grazing", "partial"]
+
+  fail:
+    - description: "Your attack goes wide, leaving you momentarily exposed."
+      effects:
+        - type: "tag"
+          target: "{actor}"
+          add: {"exposed": True}
+          duration: 1
+        - type: "tag"
+          target: "{target}"
+          add: {"opportunity": True}
+          duration: 1
+      tone_tags: ["combat", "miss", "vulnerable"]
+      
+    - description: "Not only do you miss, but you stumble and lose your footing!"
+      effects:
+        - type: "tag"
+          target: "{actor}"
+          add: {"off_balance": True, "exposed": True}
+          duration: 1
+        - type: "tag"
+          target: "{target}"
+          add: {"advantaged": True}
+          duration: 1
+      tone_tags: ["combat", "failure", "clumsy"]

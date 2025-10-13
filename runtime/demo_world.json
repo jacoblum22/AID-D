@@ -1,0 +1,269 @@
+{
+  "entities": {
+    "pc.arin": {
+      "id": "pc.arin",
+      "name": "Arin",
+      "type": "pc",
+      "current_zone": "courtyard",
+      "visible_actors": ["npc.guard"],
+      "has_weapon": true,
+      "inventory": ["rope", "healing_potion"],
+      "hp": {
+        "current": 20,
+        "max": 20
+      },
+      "guard": 12,
+      "marks": {},
+      "stats": {
+        "strength": 14,
+        "dexterity": 12,
+        "constitution": 16,
+        "intelligence": 13,
+        "wisdom": 15,
+        "charisma": 11
+      },
+      "conditions": {},
+      "meta": {
+        "visibility": "public",
+        "gm_only": false,
+        "known_by": [],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": null,
+        "extra": {}
+      }
+    },
+    "npc.guard": {
+      "id": "npc.guard",
+      "name": "Sleepy Guard",
+      "type": "npc",
+      "current_zone": "hall",
+      "visible_actors": [],
+      "has_weapon": true,
+      "inventory": ["sword", "keys"],
+      "hp": {
+        "current": 12,
+        "max": 12
+      },
+      "guard": 10,
+      "marks": {
+        "sleepy": {"source": "natural", "value": 1}
+      },
+      "stats": {
+        "strength": 13,
+        "dexterity": 10,
+        "constitution": 14,
+        "intelligence": 9,
+        "wisdom": 12,
+        "charisma": 8
+      },
+      "conditions": {},
+      "meta": {
+        "visibility": "public",
+        "gm_only": false,
+        "known_by": ["pc.arin"],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": null,
+        "extra": {}
+      }
+    },
+    "item.treasure": {
+      "id": "item.treasure",
+      "name": "Ancient Coin",
+      "type": "item",
+      "current_zone": "dungeon",
+      "description": "A mysterious coin with strange markings.",
+      "tags": {"valuable": true, "mysterious": true},
+      "meta": {
+        "visibility": "hidden",
+        "gm_only": false,
+        "known_by": [],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": "This coin unlocks the secret passage",
+        "extra": {}
+      }
+    }
+  },
+  "zones": {
+    "courtyard": {
+      "id": "courtyard",
+      "name": "Courtyard",
+      "description": "A stone courtyard bathed in pale moonlight. Ancient weathered stones form a circle around a dried fountain in the center.",
+      "tags": ["outdoor", "moonlit", "quiet"],
+      "exits": [
+        {
+          "to": "hall",
+          "label": "stone archway",
+          "direction": "north",
+          "blocked": false,
+          "cost": 1.0,
+          "meta": {
+            "visibility": "public",
+            "gm_only": false,
+            "known_by": [],
+            "created_at": null,
+            "last_changed_at": null,
+            "source": null,
+            "notes": null,
+            "extra": {}
+          }
+        }
+      ],
+      "actors": ["pc.arin"],
+      "items": [],
+      "meta": {
+        "visibility": "public",
+        "gm_only": false,
+        "known_by": ["pc.arin"],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": null,
+        "extra": {}
+      }
+    },
+    "hall": {
+      "id": "hall",
+      "name": "Great Hall",
+      "description": "A grand hall with soaring ceilings and faded tapestries hanging on the walls. Dust motes dance in the dim light filtering through stained glass windows.",
+      "tags": ["indoors", "grand", "dusty"],
+      "exits": [
+        {
+          "to": "courtyard",
+          "label": "stone archway",
+          "direction": "south",
+          "blocked": false,
+          "cost": 1.0,
+          "meta": {
+            "visibility": "public",
+            "gm_only": false,
+            "known_by": [],
+            "created_at": null,
+            "last_changed_at": null,
+            "source": null,
+            "notes": null,
+            "extra": {}
+          }
+        },
+        {
+          "to": "dungeon",
+          "label": "spiral staircase",
+          "direction": "down",
+          "blocked": false,
+          "cost": 2.0,
+          "terrain": "stairs",
+          "meta": {
+            "visibility": "public",
+            "gm_only": false,
+            "known_by": [],
+            "created_at": null,
+            "last_changed_at": null,
+            "source": null,
+            "notes": null,
+            "extra": {}
+          }
+        }
+      ],
+      "actors": ["npc.guard"],
+      "items": [],
+      "meta": {
+        "visibility": "public",
+        "gm_only": false,
+        "known_by": ["pc.arin"],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": null,
+        "extra": {}
+      }
+    },
+    "dungeon": {
+      "id": "dungeon",
+      "name": "Ancient Dungeon",
+      "description": "A dank underground chamber carved from living rock. The air is thick with moisture and the scent of ages past.",
+      "tags": ["underground", "dank", "mysterious"],
+      "exits": [
+        {
+          "to": "hall",
+          "label": "spiral staircase",
+          "direction": "up",
+          "blocked": false,
+          "cost": 2.0,
+          "terrain": "stairs",
+          "meta": {
+            "visibility": "public",
+            "gm_only": false,
+            "known_by": [],
+            "created_at": null,
+            "last_changed_at": null,
+            "source": null,
+            "notes": null,
+            "extra": {}
+          }
+        }
+      ],
+      "actors": [],
+      "items": ["item.treasure"],
+      "meta": {
+        "visibility": "hidden",
+        "gm_only": false,
+        "known_by": [],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": "This dungeon connects to a hidden network of tunnels",
+        "extra": {}
+      }
+    }
+  },
+  "scene": {
+    "round": 1,
+    "turn_index": 0,
+    "turn_order": ["pc.arin"],
+    "tags": {
+      "lighting": "dim",
+      "weather": "calm",
+      "alert": "normal",
+      "noise": "quiet"
+    },
+    "last_effect_log": [],
+    "pending_effects": [],
+    "last_diff_summary": null,
+    "meta": {
+      "visibility": "public",
+      "gm_only": false,
+      "known_by": [],
+      "created_at": null,
+      "last_changed_at": null,
+      "source": null,
+      "notes": null,
+      "extra": {}
+    }
+  },
+  "current_actor": "pc.arin",
+  "pending_action": null,
+  "turn_flags": {},
+  "clocks": {
+    "scene.tension": {
+      "id": "scene.tension",
+      "value": 3,
+      "max": 10,
+      "filled": false,
+      "meta": {
+        "visibility": "gm_only",
+        "gm_only": true,
+        "known_by": [],
+        "created_at": null,
+        "last_changed_at": null,
+        "source": null,
+        "notes": "Tracks rising tension in the scene",
+        "extra": {}
+      }
+    }
+  }
+}

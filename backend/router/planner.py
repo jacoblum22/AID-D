@@ -42,6 +42,17 @@ class PlannerResult:
     error_message: Optional[str] = None
 
 
+@dataclass
+class ActionSequenceResult:
+    """Result from the Planner that supports sequential actions."""
+
+    actions: List[Dict[str, Any]]  # List of {"tool": str, "args": Dict[str, Any]}
+    confidence: float
+    success: bool = True
+    error_message: Optional[str] = None
+    is_compound: bool = False  # True if this is a multi-action sequence
+
+
 class Planner:
     """LLM-based planner that selects tools from constrained menus."""
 
@@ -76,6 +87,39 @@ Required JSON format:
   "args": {
     "key": "value"
   },
+  "confidence": 0.85
+}"""
+
+        # System prompt for compound action parsing
+        self.compound_system_prompt = """You are a Compound Action Parser for an AI D&D game. Your job is to detect if player input contains multiple sequential actions and break them into an ordered list.
+
+DETECTION RULES:
+- Look for connecting words: "and", "then", "after", "before", "while"
+- Look for sequential verbs: "look around and move", "drink potion then attack"
+- Each action should be semantically complete
+- Maintain logical order (causality matters)
+
+OUTPUT RULES:
+- Return ONLY valid JSON
+- If single action: {"is_compound": false, "actions": [{"tool": "tool_id", "args": {...}}]}
+- If multiple actions: {"is_compound": true, "actions": [{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]}
+- Use these tool IDs: narrate_only, move, talk, attack, use_item, get_info, ask_roll, ask_clarifying
+- Common patterns:
+  * "look around" → narrate_only with topic: "look around"
+  * "move to X" → move with to: "X"
+  * "sneak to X" → move with method: "sneak"
+  * "attack X" → attack with target: "X"
+  * "talk to X" → talk with target: "X"
+  * "use item" → use_item with item_id
+  * "drink potion" → use_item with method: "consume"
+
+Required JSON format:
+{
+  "is_compound": true/false,
+  "actions": [
+    {"tool": "tool_id", "args": {"key": "value"}},
+    {"tool": "tool_id", "args": {"key": "value"}}
+  ],
   "confidence": 0.85
 }"""
 
@@ -134,6 +178,142 @@ Required JSON format:
         except Exception as e:
             logger.error(f"Error in planner: {e}")
             return self._create_fallback_result(str(e))
+
+    def get_action_sequence(
+        self, state: GameState, utterance: Utterance, debug: bool = False
+    ) -> ActionSequenceResult:
+        """
+        Get an action sequence from player input, supporting compound commands.
+
+        Args:
+            state: Current game state
+            utterance: Player input
+            debug: If True, print the prompt being sent to LLM
+
+        Returns:
+            ActionSequenceResult with list of actions to execute sequentially
+        """
+        try:
+            # First, check if this looks like a compound command
+            if self._is_likely_compound(utterance.text):
+                # Use LLM to parse compound command
+                compound_result = self._parse_compound_command(utterance, debug)
+                if compound_result.success and compound_result.is_compound:
+                    return compound_result
+
+            # Fall back to single action planning
+            single_result = self.get_plan(state, utterance, debug)
+
+            if single_result.success:
+                return ActionSequenceResult(
+                    actions=[
+                        {"tool": single_result.chosen_tool, "args": single_result.args}
+                    ],
+                    confidence=single_result.confidence,
+                    success=True,
+                    is_compound=False,
+                )
+            else:
+                return ActionSequenceResult(
+                    actions=[],
+                    confidence=0.1,
+                    success=False,
+                    error_message=single_result.error_message,
+                    is_compound=False,
+                )
+
+        except Exception as e:
+            logger.error(f"Error in action sequence planning: {e}")
+            return ActionSequenceResult(
+                actions=[],
+                confidence=0.1,
+                success=False,
+                error_message=str(e),
+                is_compound=False,
+            )
+
+    def _is_likely_compound(self, text: str) -> bool:
+        """Quick heuristic check if text might contain compound actions."""
+        text_lower = text.lower()
+        compound_indicators = [
+            " and ",
+            " then ",
+            " after ",
+            " before ",
+            "look around and",
+            "move to",
+            "go to",
+            "drink",
+            "use",
+            "cast",
+            "attack",
+        ]
+
+        # Count potential action verbs
+        action_count = 0
+        action_verbs = [
+            "look",
+            "move",
+            "go",
+            "attack",
+            "drink",
+            "use",
+            "cast",
+            "talk",
+            "say",
+        ]
+        for verb in action_verbs:
+            if verb in text_lower:
+                action_count += 1
+
+        # If multiple action verbs or explicit connecting words
+        has_connectors = any(
+            indicator in text_lower for indicator in compound_indicators[:4]
+        )
+        return action_count > 1 or has_connectors
+
+    def _parse_compound_command(
+        self, utterance: Utterance, debug: bool = False
+    ) -> ActionSequenceResult:
+        """Use LLM to parse compound command into action sequence."""
+        try:
+            user_prompt = f'Player says: "{utterance.text}"\n\nBreak this into sequential actions if it contains multiple commands, or return single action if not.'
+
+            if debug:
+                print("\n=== DEBUG: Compound parsing prompt ===")
+                print("SYSTEM PROMPT:")
+                print(self.compound_system_prompt)
+                print("\nUSER PROMPT:")
+                print(user_prompt)
+                print("=== END DEBUG ===\n")
+
+            # Call LLM for compound parsing
+            response = self._call_llm_with_retry(user_prompt, use_compound_prompt=True)
+
+            if debug:
+                print(f"\n=== DEBUG: Compound LLM Response ===")
+                print(response)
+                print("=== END DEBUG ===\n")
+
+            # Parse response
+            response_data = json.loads(response)
+
+            return ActionSequenceResult(
+                actions=response_data.get("actions", []),
+                confidence=response_data.get("confidence", 0.7),
+                success=True,
+                is_compound=response_data.get("is_compound", False),
+            )
+
+        except Exception as e:
+            logger.error(f"Compound parsing failed: {e}")
+            return ActionSequenceResult(
+                actions=[],
+                confidence=0.1,
+                success=False,
+                error_message=str(e),
+                is_compound=False,
+            )
 
     def _format_user_prompt(
         self, state: GameState, utterance: Utterance, candidates: List[ToolCandidate]
@@ -201,13 +381,22 @@ Choose the most appropriate tool and return JSON only."""
         wait=wait_exponential(multiplier=1, min=1, max=10),
         retry=retry_if_exception_type(Exception),
     )
-    def _call_llm_with_retry(self, user_prompt: str) -> str:
+    def _call_llm_with_retry(
+        self, user_prompt: str, use_compound_prompt: bool = False
+    ) -> str:
         """Call OpenAI API with retry logic."""
         try:
+            # Choose appropriate system prompt
+            system_prompt = (
+                self.compound_system_prompt
+                if use_compound_prompt
+                else self.system_prompt
+            )
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": self.system_prompt},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 max_tokens=self.max_tokens,
@@ -311,3 +500,13 @@ def get_plan(
         raise RuntimeError("Planner not initialized. Call initialize_planner() first.")
 
     return _planner_instance.get_plan(state, utterance, debug)
+
+
+def get_action_sequence(
+    state: GameState, utterance: Utterance, debug: bool = False
+) -> ActionSequenceResult:
+    """Convenience function to get an action sequence using the global planner instance."""
+    if _planner_instance is None:
+        raise RuntimeError("Planner not initialized. Call initialize_planner() first.")
+
+    return _planner_instance.get_action_sequence(state, utterance, debug)
