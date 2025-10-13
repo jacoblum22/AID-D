@@ -73,7 +73,10 @@ def save_world(world: GameState, save_file: str = "session_state.json") -> None:
 
 
 def run_prototype(
-    world_file: str = "demo_world.json", debug: bool = False, auto_save: bool = True
+    world_file: str = "demo_world.json",
+    debug: bool = False,
+    auto_save: bool = True,
+    force_new_game: bool = False,
 ) -> None:
     """
     Run the interactive prototype demo.
@@ -82,13 +85,29 @@ def run_prototype(
         world_file: JSON file containing the initial world state
         debug: Enable debug logging and output
         auto_save: Save state after each turn
+        force_new_game: Force loading from demo world, ignore saved session
     """
     # Set up environment
     setup_logging(debug)
 
     try:
-        # Load world
-        world = load_world(world_file)
+        # Load world - check for existing session unless forcing new game
+        session_path = os.path.join(os.path.dirname(__file__), "session_state.json")
+
+        if not force_new_game and os.path.exists(session_path):
+            print("🔄 Found existing session, continuing...")
+            try:
+                world = load_world("session_state.json")
+                print("📂 Loaded saved session state")
+            except Exception as e:
+                print(f"⚠️  Failed to load session ({e}), starting fresh...")
+                world = load_world(world_file)
+        else:
+            if force_new_game:
+                print("🆕 Starting new game (forced)...")
+            else:
+                print("🆕 Starting new game...")
+            world = load_world(world_file)
 
         # Initialize router
         router = get_router()

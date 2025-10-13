@@ -5081,6 +5081,9 @@ class Validator:
         updated_entity = entity.model_copy(update={"current_zone": new_zone})
         state.entities[effect.target] = updated_entity
 
+        # Invalidate redaction cache since position affects visibility
+        state.invalidate_cache()
+
         # Update visibility for all actors
         from .effects import _update_visibility
 

@@ -22,7 +22,17 @@ if __name__ == "__main__":
     parser.add_argument("--world", default="demo_world.json", help="World file to load")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--no-save", action="store_true", help="Disable auto-save")
+    parser.add_argument(
+        "--new-game",
+        action="store_true",
+        help="Force new game from demo world (ignore saved session)",
+    )
 
     args = parser.parse_args()
 
-    run_prototype(world_file=args.world, debug=args.debug, auto_save=not args.no_save)
+    run_prototype(
+        world_file=args.world,
+        debug=args.debug,
+        auto_save=not args.no_save,
+        force_new_game=args.new_game,
+    )
