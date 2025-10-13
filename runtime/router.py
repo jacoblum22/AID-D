@@ -126,30 +126,33 @@ class GameRouter:
             if self.use_staged_planner:
                 # Use 3-stage architecture
                 staged_result = get_staged_plan(world, utterance, debug=debug)
-                
+
                 if not staged_result.success:
                     return TurnResult(
                         success=False,
                         narration="I'm not sure what you want to do. Could you clarify?",
                         error_message=staged_result.error_message,
                     )
-                
+
                 # Convert staged result to action sequence format
                 action_sequence_data = []
                 for tool_call in staged_result.tool_calls:
-                    action_sequence_data.append({
-                        'tool': tool_call['tool'],
-                        'args': tool_call['args']
-                    })
-                
+                    action_sequence_data.append(
+                        {"tool": tool_call["tool"], "args": tool_call["args"]}
+                    )
+
                 is_compound = len(action_sequence_data) > 1
-                
+
                 if debug:
                     if is_compound:
-                        logger.info(f"Staged planner: compound action with {len(action_sequence_data)} steps")
+                        logger.info(
+                            f"Staged planner: compound action with {len(action_sequence_data)} steps"
+                        )
                     else:
-                        logger.info(f"Staged planner: single action: {action_sequence_data[0]['tool']}")
-                        
+                        logger.info(
+                            f"Staged planner: single action: {action_sequence_data[0]['tool']}"
+                        )
+
             else:
                 # Use legacy monolithic planner
                 action_sequence = get_action_sequence(world, utterance, debug=debug)
@@ -170,7 +173,9 @@ class GameRouter:
                             f"Legacy planner: compound action with {len(action_sequence_data)} steps"
                         )
                     else:
-                        logger.info(f"Legacy planner: single action: {action_sequence_data[0]['tool']}")
+                        logger.info(
+                            f"Legacy planner: single action: {action_sequence_data[0]['tool']}"
+                        )
 
             # Step 2: Execute action sequence
             all_tool_results = []
@@ -395,10 +400,10 @@ def process_turn(
 ) -> TurnResult:
     """
     Convenience function to process a turn using the global router.
-    
+
     Args:
         world: Current game state
-        player_input: Raw player command text  
+        player_input: Raw player command text
         actor_id: Actor taking the action (defaults to current_actor)
         debug: Enable debug output
         use_staged_planner: Use 3-stage architecture (True) or legacy monolithic (False)
