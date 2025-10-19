@@ -4443,12 +4443,26 @@ class Validator:
         if state.scene:
             scene_tags = getattr(state.scene, "tags", {})
 
+        # Get visible exits for current zone
+        visible_exits = []
+        if current_zone:
+            for exit_info in getattr(current_zone, "exits", []):
+                if getattr(exit_info, "blocked", False):
+                    continue  # Skip blocked exits
+                exit_label = getattr(exit_info, "label", None) or "passage"
+                exit_direction = getattr(exit_info, "direction", None) or ""
+                if exit_direction:
+                    visible_exits.append(f"{exit_label} ({exit_direction})")
+                else:
+                    visible_exits.append(exit_label)
+
         # Create facts dict
         facts = {
             "pov": actor_id,
             "zone": current_zone_id,
             "zone_name": current_zone.name if current_zone else "Unknown Location",
             "visible_entities": visible_entities,
+            "visible_exits": visible_exits,  # Add exit information
             "salient_features": salient_features,
             "scene_tags": scene_tags,
             "topic": topic,
@@ -5080,6 +5094,16 @@ class Validator:
         # Update entity position
         updated_entity = entity.model_copy(update={"current_zone": new_zone})
         state.entities[effect.target] = updated_entity
+
+        # Mark new zone as discovered if it's an actor and new_zone is valid
+        if (
+            hasattr(updated_entity, "type")
+            and updated_entity.type in ["pc", "npc"]
+            and new_zone is not None
+        ):
+            from .zone_graph import discover_zone
+
+            discover_zone(effect.target, new_zone, state)
 
         # Invalidate redaction cache since position affects visibility
         state.invalidate_cache()

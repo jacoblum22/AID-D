@@ -57,6 +57,7 @@ class GameRouter:
         self.validator = Validator()
         self.use_staged_planner = use_staged_planner
         self._initialized = False
+        self.last_narration = ""  # Track previous narration for continuity
 
     def initialize(self) -> None:
         """Initialize LLM-based components."""
@@ -66,14 +67,26 @@ class GameRouter:
         try:
             # Initialize planner(s)
             if self.use_staged_planner:
-                initialize_staged_planner(config.OPENAI_API_KEY, config.OPENAI_MODEL)
-                logger.info("Initialized staged planner (3-stage architecture)")
+                initialize_staged_planner(config.OPENAI_API_KEY, config.PLANNING_MODEL)
+                logger.info(
+                    f"Initialized staged planner with {config.PLANNING_MODEL} (3-stage architecture)"
+                )
             else:
-                initialize_planner(config.OPENAI_API_KEY, config.OPENAI_MODEL)
-                logger.info("Initialized monolithic planner (legacy)")
+                initialize_planner(config.OPENAI_API_KEY, config.PLANNING_MODEL)
+                logger.info(
+                    f"Initialized monolithic planner with {config.PLANNING_MODEL} (legacy)"
+                )
 
             # Initialize narration generator
-            initialize_generator(config.OPENAI_API_KEY, config.OPENAI_MODEL)
+            initialize_generator(config.OPENAI_API_KEY, config.NARRATION_MODEL)
+            logger.info(
+                f"Initialized narration generator with {config.NARRATION_MODEL} (player-facing)"
+            )
+
+            # DEBUG: Show model configuration
+            logger.info(f"🔧 MODEL CONFIGURATION:")
+            logger.info(f"🤖 Planning Model: {config.PLANNING_MODEL}")
+            logger.info(f"🎭 Narration Model: {config.NARRATION_MODEL}")
 
             self._initialized = True
             logger.info("Game router initialized successfully")
@@ -81,6 +94,11 @@ class GameRouter:
         except Exception as e:
             logger.error(f"Failed to initialize game router: {e}")
             raise RuntimeError(f"Router initialization failed: {e}")
+
+    def reset_narrative_history(self) -> None:
+        """Reset narrative history for new game sessions."""
+        self.last_narration = ""
+        logger.info("Narrative history reset for new game session")
 
     def process_turn(
         self,
@@ -181,6 +199,10 @@ class GameRouter:
             all_tool_results = []
             all_narrations = []
             overall_success = True
+            previous_narration = (
+                self.last_narration
+            )  # Use previous narration from last turn
+            detailed_errors = []  # Track detailed error information
 
             for i, action in enumerate(action_sequence_data):
                 tool_id = action["tool"]
@@ -202,21 +224,73 @@ class GameRouter:
 
                 all_tool_results.append(tool_result)
 
+                # Auto-enhance move actions with zone context data (no separate narration)
+                if (
+                    tool_result.ok
+                    and tool_id == "move"
+                    and not any(
+                        action["tool"] == "narrate_only"
+                        for action in action_sequence_data
+                    )
+                ):
+
+                    if debug:
+                        logger.info("Auto-enhancing move with zone context data")
+
+                    # Gather zone context data without generating separate narration
+                    narrate_args = {
+                        "actor": actor_id,
+                        "topic": "taking in the new surroundings",
+                    }
+
+                    zone_description_result = self.validator.validate_and_execute(
+                        "narrate_only", narrate_args, world, utterance
+                    )
+
+                    if zone_description_result.ok:
+                        # Merge the zone description facts with the move result for richer context
+                        if hasattr(tool_result, "facts") and hasattr(
+                            zone_description_result, "facts"
+                        ):
+                            # Add all contextual data from narrate_only to move facts
+                            for key in [
+                                "salient_features",
+                                "scene_tags",
+                                "visible_entities",
+                                "visible_exits",
+                            ]:
+                                if key in zone_description_result.facts:
+                                    tool_result.facts[key] = (
+                                        zone_description_result.facts[key]
+                                    )
+
+                        if debug:
+                            logger.info(
+                                "Successfully enhanced move with zone context data"
+                            )
+                    else:
+                        if debug:
+                            logger.warning(
+                                f"Auto zone context gathering failed: {zone_description_result.error_message}"
+                            )
+
                 # Handle roll progression display if needed
                 if (
                     tool_result.ok
-                    and tool_result.narration_hint
+                    and isinstance(tool_result.narration_hint, dict)
                     and tool_result.narration_hint.get("roll_progression")
                 ):
 
                     roll_narration = self._generate_roll_progression(tool_result)
                     all_narrations.append(roll_narration)
+                    previous_narration = roll_narration  # Update previous for next step
                 else:
                     # Step 3: Generate narration for this action
                     step_narration = self._generate_narration(
-                        tool_result, world, actor_id, debug
+                        tool_result, world, actor_id, previous_narration, debug
                     )
                     all_narrations.append(step_narration)
+                    previous_narration = step_narration  # Update previous for next step
 
                 if not tool_result.ok:
                     overall_success = False
@@ -239,7 +313,9 @@ class GameRouter:
                                 f"Applied {len(tool_result.effects)} effects from step {i+1}"
                             )
                     except Exception as e:
-                        logger.error(f"Effect application failed for step {i+1}: {e}")
+                        error_msg = f"Effect application failed for step {i+1}: {e}"
+                        logger.error(error_msg)
+                        detailed_errors.append(error_msg)
                         overall_success = False
                         all_narrations.append(f"Something went wrong with {tool_id}.")
                         break
@@ -250,6 +326,10 @@ class GameRouter:
             else:
                 # For multiple actions, combine with logical flow
                 combined_narration = " ".join(all_narrations)
+
+            # Update last narration for next turn's continuity
+            if combined_narration.strip():
+                self.last_narration = combined_narration
 
             # Step 6: Update turn counter
             if hasattr(world.scene, "round"):
@@ -275,7 +355,15 @@ class GameRouter:
                     all_tool_results[0] if all_tool_results else None
                 ),  # Backward compatibility
                 tool_results=all_tool_results,
-                error_message=None if overall_success else "One or more actions failed",
+                error_message=(
+                    None
+                    if overall_success
+                    else (
+                        "; ".join(detailed_errors)
+                        if detailed_errors
+                        else "One or more actions failed"
+                    )
+                ),
                 is_compound=is_compound,
             )
 
@@ -289,6 +377,10 @@ class GameRouter:
 
     def _generate_roll_progression(self, tool_result: ToolResult) -> str:
         """Generate dramatic roll progression narration with consequences."""
+        # Defensive check for narration_hint type
+        if not isinstance(tool_result.narration_hint, dict):
+            return "Something happens."
+
         roll_setup = tool_result.narration_hint.get("roll_setup", {})
         dice = tool_result.narration_hint.get("dice", {})
         outcome = tool_result.narration_hint.get("outcome", "unknown")
@@ -348,6 +440,7 @@ class GameRouter:
         tool_result: ToolResult,
         world: GameState,
         actor_id: str,
+        previous_narration: str = "",
         debug: bool = False,
     ) -> str:
         """Generate appropriate narration for the tool result."""
@@ -364,7 +457,9 @@ class GameRouter:
         # Use LLM narration for selected tools
         if tool_result.tool_id in llm_narration_tools:
             try:
-                narration = generate_narration(tool_result, world, actor_id)
+                narration = generate_narration(
+                    tool_result, world, actor_id, previous_narration
+                )
                 if debug:
                     logger.info(f"Generated LLM narration for {tool_result.tool_id}")
                 return narration
@@ -388,6 +483,14 @@ def get_router(use_staged_planner: bool = True) -> GameRouter:
     global _router_instance
     if _router_instance is None:
         _router_instance = GameRouter(use_staged_planner=use_staged_planner)
+    else:
+        # Validate that the requested configuration matches the existing instance
+        if _router_instance.use_staged_planner != use_staged_planner:
+            raise ValueError(
+                f"Router already initialized with use_staged_planner={_router_instance.use_staged_planner}, "
+                f"but requested use_staged_planner={use_staged_planner}. "
+                f"Cannot change configuration after initialization."
+            )
     return _router_instance
 
 

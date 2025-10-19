@@ -113,6 +113,11 @@ def run_prototype(
         router = get_router()
         router.initialize()
 
+        # Reset narrative history for fresh sessions
+        session_path = os.path.join(os.path.dirname(__file__), "session_state.json")
+        if force_new_game or not os.path.exists(session_path):
+            router.reset_narrative_history()
+
         # Display welcome message
         print("=" * 60)
         print("🎲 Welcome to AID&D Prototype! 🎲")

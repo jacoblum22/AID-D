@@ -54,7 +54,9 @@ class OutcomeResolver:
 
         for filename in os.listdir(tables_dir):
             if filename.endswith(".yaml") or filename.endswith(".yml"):
-                table_name = filename.split(".")[0]  # Remove extension
+                table_name = filename.rsplit(".", 1)[
+                    0
+                ]  # Remove extension, handle multiple dots
                 filepath = os.path.join(tables_dir, filename)
 
                 try:
@@ -108,11 +110,18 @@ class OutcomeResolver:
 
         # Add to existing effects list
         if processed_effects:
+            if not hasattr(result, "effects") or result.effects is None:
+                result.effects = []
             result.effects.extend(processed_effects)
 
         # Enrich narration hint
         result.narration_hint["consequence"] = consequence.description
+
+        # Defensive check for tone_tags existence
+        if "tone_tags" not in result.narration_hint:
+            result.narration_hint["tone_tags"] = []
         result.narration_hint["tone_tags"].extend(consequence.tone_tags)
+
         result.narration_hint["consequences_resolved"] = True
 
         logger.debug(f"Resolved {domain}.{outcome}: {consequence.description}")
@@ -169,6 +178,9 @@ class OutcomeResolver:
 
         # Pick random variant if multiple options
         if isinstance(outcome_data, list):
+            if not outcome_data:  # Defensive check for empty list
+                logger.warning(f"Empty outcome list for {domain_key}.{outcome}")
+                return None
             chosen = random.choice(outcome_data)
         else:
             chosen = outcome_data

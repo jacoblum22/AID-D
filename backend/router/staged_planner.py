@@ -3,7 +3,6 @@ Staged Planner - Clean 3-Stage LLM Architecture for Action Planning
 
 This module implements a cleaner separation of concerns for LLM-based planning:
 
-Stage 0: Context Preloader - Extract minimal world state
 Stage 1: Intent Parser - Map utterances to tool names (no world context)
 Stage 2: Argument Filler - Fill tool arguments using constrained valid values
 Stage 3: Executor - Deterministic tool execution (handled by router)
@@ -18,7 +17,7 @@ Benefits:
 
 import json
 import logging
-from typing import Dict, Any, List, Optional, get_origin, get_args
+from typing import Dict, Any, List, Optional, Union, Literal, get_origin, get_args
 from dataclasses import dataclass
 from openai import OpenAI
 import inspect
@@ -166,11 +165,7 @@ class SchemaIntrospector:
             else:
                 lines.append(f"{field_name}: {constraint_type}")
 
-        return "\\n".join(lines)
-
-
-# Add missing import
-from typing import Union, Literal
+        return "\n".join(lines)
 
 
 @dataclass
@@ -211,15 +206,17 @@ class StagedPlanner:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o-mini",
-        max_tokens: int = 300,
-        temperature: float = 0.1,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ):
         """Initialize the staged planner."""
+        import config
+
         self.client = OpenAI(api_key=api_key)
-        self.model = model
-        self.max_tokens = max_tokens
-        self.temperature = temperature
+        self.model = model or config.PLANNING_MODEL
+        self.max_tokens = max_tokens or config.PLANNING_MAX_TOKENS
+        self.temperature = temperature or config.PLANNING_TEMPERATURE
 
         # Stage 1: Intent Parser - pure linguistic classification
         self.intent_prompt = """You are an intent classifier for a text adventure game.
@@ -518,18 +515,32 @@ Return ONLY a JSON object with "tool_calls" field:
             logger.info(f"LLM call - user: {user_prompt}")
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                response_format={"type": "json_object"},
-            )
+            if self.model.startswith("gpt-5"):
+                # Use Responses API for GPT-5 models
+                api_params = {
+                    "model": self.model,
+                    "input": f"{system_prompt}\n\n{user_prompt}",
+                    "reasoning": {"effort": "minimal"},  # Fast responses for planning
+                    "text": {"verbosity": "low"},  # Concise outputs
+                }
 
-            content = response.choices[0].message.content
+                response = self.client.responses.create(**api_params)
+                content = response.output_text
+            else:
+                # Use Chat Completions API for non-GPT-5 models
+                api_params = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_completion_tokens": self.max_tokens,
+                    "temperature": self.temperature,
+                    "response_format": {"type": "json_object"},
+                }
+
+                response = self.client.chat.completions.create(**api_params)
+                content = response.choices[0].message.content
             result = content.strip() if content else ""
 
             if debug:
@@ -546,7 +557,7 @@ Return ONLY a JSON object with "tool_calls" field:
 _staged_planner_instance: Optional[StagedPlanner] = None
 
 
-def initialize_staged_planner(api_key: str, model: str = "gpt-4o-mini") -> None:
+def initialize_staged_planner(api_key: str, model: Optional[str] = None) -> None:
     """Initialize the global staged planner instance."""
     global _staged_planner_instance
     _staged_planner_instance = StagedPlanner(api_key, model)

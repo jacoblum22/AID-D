@@ -1,13 +1,14 @@
 """
 LLM-based narration generator for AID&D prototype.
 
-This module takes structured ToolResult data and game state, then uses
-4o-mini to generate immersive, literary narration that goes beyond
-the deterministic templates used in tools.
+This module takes structured ToolResult data and generates
+immersive, literary narration that goes beyond the deterministic
+templates used in tools.
 """
 
 import json
 import logging
+import os
 from typing import Dict, Any, Optional, List
 from textwrap import dedent
 
@@ -36,15 +37,18 @@ class NarrationGenerator:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "gpt-4o-mini",
-        max_tokens: int = 150,
-        temperature: float = 0.7,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ):
         """Initialize the narration generator."""
-        self.client = OpenAI(api_key=api_key or config.OPENAI_API_KEY)
-        self.model = model
-        self.max_tokens = max_tokens
-        self.temperature = temperature
+        self.client = OpenAI(
+            api_key=api_key or config.OPENAI_API_KEY,
+            timeout=30.0,  # Set default timeout for all requests
+        )
+        self.model = model or config.NARRATION_MODEL
+        self.max_tokens = max_tokens or config.NARRATION_MAX_TOKENS
+        self.temperature = temperature or config.NARRATION_TEMPERATURE
 
         # Base system prompt for narration role
         self.system_prompt = dedent(
@@ -53,7 +57,7 @@ class NarrationGenerator:
             Your task is to narrate what happens, given structured data from game mechanics.
 
             CRITICAL RULES:
-            - Write 1-3 sentences of immersive, literary narration
+            - Write rich, immersive, literary narration with vivid detail
             - Use sensory detail and atmospheric language
             - Stay consistent with the provided facts - do NOT invent new mechanics or outcomes
             - Do NOT reveal hidden or GM-only information
@@ -107,27 +111,124 @@ class NarrationGenerator:
             # Create the prompt
             user_prompt = self._create_prompt(result, context, previous_narration)
 
-            # Call LLM
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
+            # DEBUG: Log the full prompt being sent to GPT-5
+            full_input = f"{self.system_prompt}\n\n{user_prompt}"
+
+            # Use INFO level for prompt debugging if explicitly requested, otherwise DEBUG
+            prompt_log_level = (
+                logging.INFO if os.getenv("SHOW_PROMPTS") else logging.DEBUG
+            )
+            logger.log(prompt_log_level, f"🎭 ===== FULL PROMPT DEBUG =====")
+            logger.log(
+                prompt_log_level,
+                f"🎭 SYSTEM PROMPT ({len(self.system_prompt)} chars): {self.system_prompt}",
+            )
+            logger.log(
+                prompt_log_level,
+                f"🎭 USER PROMPT ({len(user_prompt)} chars): {user_prompt}",
+            )
+            logger.log(
+                prompt_log_level,
+                f"🎭 FULL INPUT ({len(full_input)} chars): {full_input[:300]}...",
+            )
+            logger.log(prompt_log_level, f"🎭 ===== END PROMPT DEBUG =====")
+
+            # DEBUG: Log which model and settings are being used
+            logger.debug(
+                f"🎭 NARRATION MODEL DEBUG: Using model '{self.model}' with max_tokens={self.max_tokens}"
+            )
+            logger.debug(
+                f"🎭 EXACT API MODEL NAME: '{self.model}' (checking for full GPT-5 vs nano)"
             )
 
-            narration = response.choices[0].message.content
-            if narration:
+            # Call LLM with appropriate API
+            if self.model.startswith("gpt-5"):
+                logger.debug(f"🚀 Using GPT-5 Responses API with text verbosity=medium")
+                # Use Responses API for GPT-5 models with correct verbosity parameter
+                response = self.client.responses.create(
+                    model=self.model,
+                    input=f"{self.system_prompt}\n\n{user_prompt}",
+                    text={
+                        "verbosity": "medium"
+                    },  # Balanced detail without excessive flowery language
+                    # Note: timeout is handled at client level, max_output_tokens not supported yet
+                )
+                narration = response.output_text
+                logger.debug(
+                    f"🚀 GPT-5 raw response length: {len(narration) if narration else 0}"
+                )
+                logger.debug(
+                    f"🚀 GPT-5 raw response preview: '{narration[:100] if narration else 'EMPTY'}'..."
+                )
+            else:
+                logger.debug(f"⚙️ Using Chat Completions API for non-GPT-5 model")
+                # Use Chat Completions API for non-GPT-5 models
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_completion_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    # timeout handled at client level
+                )
+                narration = response.choices[0].message.content
+                logger.debug(
+                    f"🎭 Chat Completions response length: {len(narration) if narration else 0}"
+                )
+
+            logger.debug(
+                f"🎭 Final narration check: narration={'EXISTS' if narration else 'EMPTY'}"
+            )
+            if narration and narration.strip():
                 return narration.strip()
             else:
+                logger.warning(
+                    f"🚨 Narration empty/invalid, falling back to summary: '{result.narration_hint.get('summary', 'Something happens.')}'"
+                )
                 return result.narration_hint.get("summary", "Something happens.")
 
         except Exception as e:
             logger.error(f"Narration generation failed: {e}")
             # Fallback to original summary
             return result.narration_hint.get("summary", "Something happens.")
+
+    def _process_zone_entities(
+        self, redacted_state: Dict[str, Any], zone_actors: List[str], pov_id: str
+    ) -> List[Dict[str, Any]]:
+        """Process entities in a zone to extract visible entity information with death status."""
+        visible_entities = []
+
+        for actor_id in zone_actors:
+            if actor_id != pov_id:  # Don't include self
+                # Get entity data from 'entities' field
+                actor = redacted_state.get("entities", {}).get(actor_id, {})
+                if actor:
+                    entity_info = {
+                        "id": actor_id,
+                        "name": actor.get("name", "unknown entity"),
+                        "type": actor.get("type", "unknown"),
+                    }
+
+                    # Check if entity is dead (HP = 0) and mark for special narration
+                    hp = actor.get("hp", {})
+                    current_hp = None
+                    if isinstance(hp, dict):
+                        current_hp = hp.get("current")
+
+                    # Only check for death if we have valid HP data
+                    if current_hp is not None and current_hp <= 0:
+                        entity_info["is_dead"] = True
+                        entity_info["description"] = (
+                            f"the body of {entity_info['name']}"
+                        )
+                    else:
+                        entity_info["is_dead"] = False
+
+                    visible_entities.append(entity_info)
+
+        return visible_entities
 
     def _build_context(
         self,
@@ -138,8 +239,8 @@ class NarrationGenerator:
     ) -> Dict[str, Any]:
         """Build safe context information for the LLM."""
 
-        # Get POV actor info
-        pov_actor = redacted_state.get("actors", {}).get(pov_id, {})
+        # Get POV actor info from entities
+        pov_actor = redacted_state.get("entities", {}).get(pov_id, {})
         pov_name = pov_actor.get("name", "You")
 
         # For move actions, we need to describe the DESTINATION zone, not current zone
@@ -151,43 +252,31 @@ class NarrationGenerator:
             zone_name = target_zone.get("name", "an unknown location")
             zone_description = target_zone.get("description", "")
 
+            # Get visible exits for this zone, excluding the one we just came through
+            from_zone_id = result.facts.get("from_zone") if result.facts else None
+            visible_exits = []
+            zone_exits = target_zone.get("exits", [])
+            for exit_info in zone_exits:
+                if exit_info.get("blocked", False):
+                    continue  # Skip blocked exits
+                # Skip the exit that leads back to where we came from
+                if from_zone_id and exit_info.get("to") == from_zone_id:
+                    continue
+                exit_label = exit_info.get("label", "passage")
+                exit_direction = exit_info.get("direction", "")
+                if exit_direction:
+                    visible_exits.append(f"{exit_label} ({exit_direction})")
+                else:
+                    visible_exits.append(exit_label)
+
             # Check if this is the first time entering this zone
             is_first_visit = not is_zone_discovered(pov_id, target_zone_id, world)
 
             # Get actors in the DESTINATION zone (including NPCs the player will encounter)
-            visible_entities = []
-            # The redacted state adds an 'entities' field with visible entity IDs in the zone
             zone_actors = target_zone.get("entities", [])
-
-            for actor_id in zone_actors:
-                if actor_id != pov_id:  # Don't include self
-                    # Try both 'actors' and 'entities' fields for entity data
-                    actor = redacted_state.get("actors", {}).get(
-                        actor_id, {}
-                    ) or redacted_state.get("entities", {}).get(actor_id, {})
-                    if actor:
-                        entity_info = {
-                            "id": actor_id,
-                            "name": actor.get("name", "unknown entity"),
-                            "type": actor.get("entity_type", "unknown"),
-                        }
-
-                        # Check if entity is dead (HP = 0) and mark for special narration (MOVE ACTION)
-                        hp = actor.get("hp", {})
-                        current_hp = None
-                        if isinstance(hp, dict):
-                            current_hp = hp.get("current")
-
-                        # Only check for death if we have valid HP data
-                        if current_hp is not None and current_hp <= 0:
-                            entity_info["is_dead"] = True
-                            entity_info["description"] = (
-                                f"the body of {entity_info['name']}"
-                            )
-                        else:
-                            entity_info["is_dead"] = False
-
-                        visible_entities.append(entity_info)
+            visible_entities = self._process_zone_entities(
+                redacted_state, zone_actors, pov_id
+            )
 
             context_zone_id = target_zone_id
         else:
@@ -197,42 +286,27 @@ class NarrationGenerator:
             zone_name = current_zone.get("name", "an unknown location")
             zone_description = current_zone.get("description", "")
 
+            # Get visible exits for this zone
+            visible_exits = []
+            zone_exits = current_zone.get("exits", [])
+            for exit_info in zone_exits:
+                if exit_info.get("blocked", False):
+                    continue  # Skip blocked exits
+                exit_label = exit_info.get("label", "passage")
+                exit_direction = exit_info.get("direction", "")
+                if exit_direction:
+                    visible_exits.append(f"{exit_label} ({exit_direction})")
+                else:
+                    visible_exits.append(exit_label)
+
             # For non-move actions, zone is already known (not first visit)
             is_first_visit = False
 
             # Get visible entities in the current zone
-            visible_entities = []
-            # The redacted state adds an 'entities' field with visible entity IDs in the zone
             zone_actors = current_zone.get("entities", [])
-            for actor_id in zone_actors:
-                if actor_id != pov_id:  # Don't include self
-                    # Try both 'actors' and 'entities' fields for entity data
-                    actor = redacted_state.get("actors", {}).get(
-                        actor_id, {}
-                    ) or redacted_state.get("entities", {}).get(actor_id, {})
-                    if actor:
-                        entity_info = {
-                            "id": actor_id,
-                            "name": actor.get("name", "unknown entity"),
-                            "type": actor.get("entity_type", "unknown"),
-                        }
-
-                        # Check if entity is dead (HP = 0) and mark for special narration (NON-MOVE ACTION)
-                        hp = actor.get("hp", {})
-                        current_hp = None
-                        if isinstance(hp, dict):
-                            current_hp = hp.get("current")
-
-                        # Only check for death if we have valid HP data
-                        if current_hp is not None and current_hp <= 0:
-                            entity_info["is_dead"] = True
-                            entity_info["description"] = (
-                                f"the body of {entity_info['name']}"
-                            )
-                        else:
-                            entity_info["is_dead"] = False
-
-                        visible_entities.append(entity_info)
+            visible_entities = self._process_zone_entities(
+                redacted_state, zone_actors, pov_id
+            )
 
             context_zone_id = current_zone_id
 
@@ -252,6 +326,7 @@ class NarrationGenerator:
                 "name": zone_name,
                 "description": zone_description,
                 "visible_entities": visible_entities,
+                "visible_exits": visible_exits,
                 "is_first_visit": is_first_visit,  # Add discovery info
             },
             "scene": {
@@ -265,15 +340,42 @@ class NarrationGenerator:
     ) -> str:
         """Create the prompt for LLM narration generation."""
 
-        # Extract key information
+        # Extract key information first
         tool_id = result.tool_id
         facts = result.facts
         narration_hint = result.narration_hint
         effects = result.effects
 
-        # Get tone guidance
-        tone_tags = narration_hint.get("tone_tags", [])
-        sensory_focus = narration_hint.get("sensory", [])
+        # Process entities to add death status and descriptions for enhanced narration
+        enhanced_facts = dict(facts)  # Copy facts to avoid modifying original
+
+        # Add processed entity information if there are visible entities
+        processed_entities = []
+        for entity in context["current_zone"]["visible_entities"]:
+            entity_info = {
+                "id": entity["id"],
+                "name": entity["name"],
+                "type": entity.get("type", "unknown"),
+            }
+
+            # Check if entity is dead (HP = 0) for special narration emphasis
+            if entity.get("is_dead", False):
+                entity_info["status"] = "CORPSE"
+                entity_info["description"] = entity.get(
+                    "description", f"the body of {entity['name']}"
+                )
+                entity_info["narration_priority"] = (
+                    "HIGH"  # Should be prominently mentioned
+                )
+            else:
+                entity_info["status"] = "alive"
+
+            processed_entities.append(entity_info)
+
+        if processed_entities:
+            enhanced_facts["processed_entities"] = processed_entities
+
+        # Use enhanced facts for narration
 
         # Build effects summary if there are any
         effects_summary = ""
@@ -284,27 +386,7 @@ class NarrationGenerator:
             if hp_changes:
                 effects_summary += f" (including HP changes)"
 
-        # Format visible entities with special handling for dead ones
-        entities_description = []
-        dead_entities = []
-        living_entities = []
-
-        for entity in context["current_zone"]["visible_entities"]:
-            if entity.get("is_dead", False):
-                dead_entities.append(entity.get("description", entity["name"]))
-            else:
-                living_entities.append(entity["name"])
-
-        if dead_entities:
-            entities_description.append(
-                f"CORPSES: {', '.join(dead_entities)} (IMPORTANT: These should be prominently mentioned!)"
-            )
-        if living_entities:
-            entities_description.append(f"Living: {', '.join(living_entities)}")
-
-        entities_text = (
-            " | ".join(entities_description) if entities_description else "None"
-        )
+        # Entity data is now included in the JSON facts, no separate formatting needed
 
         # Add previous narration for continuity if provided
         previous_context = ""
@@ -318,39 +400,14 @@ class NarrationGenerator:
         if context["current_zone"]["is_first_visit"]:
             discovery_context = f"\n[IMPORTANT: First Time in Zone] - Use discovery language! Instead of naming the location directly, describe what the character discovers (e.g., 'you find yourself in a vast hall' instead of 'you enter the Great Hall')."
 
+        # Streamlined prompt - Enhanced JSON facts contain all necessary data including processed entities
         prompt = dedent(
             f"""
-            [Tool Executed]: {tool_id}
+            Generate immersive narration for this game event:
             
-            [Player Character]: {context['pov_actor']['name']} (HP: {context['pov_actor']['hp']}/{context['pov_actor']['max_hp']})
-            
-            [Current Location]: {context['current_zone']['name']}
-            {context['current_zone']['description']}
-            
-            [Visible Entities]: {entities_text}
-            
-            [Scene Atmosphere]: Round {context['scene']['round']}
-            Tags: {', '.join([f"{k}={v}" for k, v in context['scene']['tags'].items()]) or 'normal'}
-            
-            [What Happened - Raw Facts]:
-            {json.dumps(facts, indent=2)}
-            
-            [Tone Guidance]: {', '.join(tone_tags) if tone_tags else 'neutral'}
-            [Sensory Focus]: {', '.join(sensory_focus) if sensory_focus else 'visual'}
-            
-            [Original Summary]: {narration_hint.get('summary', 'No summary provided')}
+            {json.dumps(enhanced_facts, indent=2)}
             {effects_summary}{previous_context}{discovery_context}
-            
-            NARRATIVE STYLE REQUIREMENTS:
-            - Always use 2nd person present tense ("You step", "You see", etc.)
-            - Use descriptive language instead of exact names (e.g., "a imposing guard" not "Sleepy Guard", "a grand hall" not "Great Hall")  
-            - Be immersive and atmospheric with sensory details
-            - Stay true to the mechanical facts but describe them creatively
-            
-            Write immersive narration for what just happened from the player's perspective.
-            Use the tone guidance and sensory focus. Be creative but stay true to the facts.
-            {f"Build naturally from the previous narration to create smooth narrative flow." if previous_narration.strip() else ""}
-        """
+            """
         ).strip()
 
         return prompt
@@ -361,7 +418,7 @@ _generator_instance: Optional[NarrationGenerator] = None
 
 
 def initialize_generator(
-    api_key: Optional[str] = None, model: str = "gpt-4o-mini"
+    api_key: Optional[str] = None, model: Optional[str] = None
 ) -> None:
     """Initialize the global narration generator."""
     global _generator_instance

@@ -25,7 +25,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--new-game",
         action="store_true",
-        help="Force new game from demo world (ignore saved session)",
+        help="Force new game (ignore saved session), respects --world argument",
     )
 
     args = parser.parse_args()

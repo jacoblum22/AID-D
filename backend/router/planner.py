@@ -1,5 +1,5 @@
 """
-Planner Prompt (Step 3) - LLM-based tool selection from constrained menu.
+Planner - LLM-based tool selection from filtered menu.
 
 The Planner takes the affordance filter output and:
 1. Formats it into a numbered, deterministic menu
@@ -59,15 +59,17 @@ class Planner:
     def __init__(
         self,
         api_key: str,
-        model: str = "gpt-4o-mini",
-        max_tokens: int = 500,
-        temperature: float = 0.1,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
     ):
         """Initialize the planner with OpenAI configuration."""
+        import config
+
         self.client = OpenAI(api_key=api_key)
-        self.model = model
-        self.max_tokens = max_tokens
-        self.temperature = temperature
+        self.model = model or config.PLANNING_MODEL
+        self.max_tokens = max_tokens or config.PLANNING_MAX_TOKENS
+        self.temperature = temperature or config.PLANNING_TEMPERATURE
 
         # System prompt for the planner role
         self.system_prompt = """You are a Planner for an AI D&D game. Your job is to choose exactly one tool from the provided numbered list and return JSON only.
@@ -235,18 +237,12 @@ Required JSON format:
     def _is_likely_compound(self, text: str) -> bool:
         """Quick heuristic check if text might contain compound actions."""
         text_lower = text.lower()
+        # Only include the compound connectors that are actually used
         compound_indicators = [
             " and ",
             " then ",
             " after ",
             " before ",
-            "look around and",
-            "move to",
-            "go to",
-            "drink",
-            "use",
-            "cast",
-            "attack",
         ]
 
         # Count potential action verbs
@@ -268,7 +264,7 @@ Required JSON format:
 
         # If multiple action verbs or explicit connecting words
         has_connectors = any(
-            indicator in text_lower for indicator in compound_indicators[:4]
+            indicator in text_lower for indicator in compound_indicators
         )
         return action_count > 1 or has_connectors
 
@@ -393,18 +389,32 @@ Choose the most appropriate tool and return JSON only."""
                 else self.system_prompt
             )
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                response_format={"type": "json_object"},  # Force JSON response
-            )
+            if self.model.startswith("gpt-5"):
+                # Use Responses API for GPT-5 models
+                api_params = {
+                    "model": self.model,
+                    "input": f"{system_prompt}\n\n{user_prompt}",
+                    "reasoning": {"effort": "minimal"},  # Fast responses for planning
+                    "text": {"verbosity": "low"},  # Concise outputs
+                }
 
-            content = response.choices[0].message.content
+                response = self.client.responses.create(**api_params)
+                content = response.output_text
+            else:
+                # Use Chat Completions API for non-GPT-5 models
+                api_params = {
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_completion_tokens": self.max_tokens,
+                    "temperature": self.temperature,
+                    "response_format": {"type": "json_object"},  # Force JSON response
+                }
+
+                response = self.client.chat.completions.create(**api_params)
+                content = response.choices[0].message.content
             return content.strip() if content else ""
 
         except Exception as e:
@@ -486,7 +496,7 @@ Choose the most appropriate tool and return JSON only."""
 _planner_instance: Optional[Planner] = None
 
 
-def initialize_planner(api_key: str, model: str = "gpt-4o-mini") -> None:
+def initialize_planner(api_key: str, model: Optional[str] = None) -> None:
     """Initialize the global planner instance."""
     global _planner_instance
     _planner_instance = Planner(api_key=api_key, model=model)
