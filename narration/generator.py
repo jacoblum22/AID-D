@@ -141,7 +141,7 @@ class NarrationGenerator:
 
             # Call LLM with appropriate API
             if self.model.startswith("gpt-5"):
-                logger.debug(f"🚀 Using GPT-5 Responses API with text verbosity=medium")
+                logger.debug("🚀 Using GPT-5 Responses API with text verbosity=medium")
                 # Use Responses API for GPT-5 models with correct verbosity parameter
                 response = self.client.responses.create(
                     model=self.model,
@@ -159,7 +159,7 @@ class NarrationGenerator:
                     f"🚀 GPT-5 raw response preview: '{narration[:100] if narration else 'EMPTY'}'..."
                 )
             else:
-                logger.debug(f"⚙️ Using Chat Completions API for non-GPT-5 model")
+                logger.debug("⚙️ Using Chat Completions API for non-GPT-5 model")
                 # Use Chat Completions API for non-GPT-5 models
                 response = self.client.chat.completions.create(
                     model=self.model,
@@ -340,9 +340,7 @@ class NarrationGenerator:
         """Create the prompt for LLM narration generation."""
 
         # Extract key information first
-        tool_id = result.tool_id
         facts = result.facts
-        narration_hint = result.narration_hint
         effects = result.effects
 
         # Process entities to add death status and descriptions for enhanced narration
@@ -383,7 +381,7 @@ class NarrationGenerator:
             # Add brief summary of major effects
             hp_changes = [e for e in effects if e.get("type") == "hp"]
             if hp_changes:
-                effects_summary += f" (including HP changes)"
+                effects_summary += " (including HP changes)"
 
         # Entity data is now included in the JSON facts, no separate formatting needed
 

@@ -303,8 +303,12 @@ Required JSON format:
             # Parse response
             response_data = json.loads(response)
 
+            # Validate and clean up the actions
+            raw_actions = response_data.get("actions", [])
+            validated_actions = self._validate_compound_actions(raw_actions)
+
             return ActionSequenceResult(
-                actions=response_data.get("actions", []),
+                actions=validated_actions,
                 confidence=response_data.get("confidence", 0.7),
                 success=True,
                 is_compound=response_data.get("is_compound", False),
@@ -319,6 +323,40 @@ Required JSON format:
                 error_message=str(e),
                 is_compound=False,
             )
+
+    def _validate_compound_actions(
+        self, actions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Validate and clean up compound actions from LLM."""
+        # Get valid tool IDs
+        valid_tools = {tool.id for tool in TOOL_CATALOG}
+
+        validated = []
+        max_steps = 3  # Cap at 3 steps
+
+        for action in actions[:max_steps]:  # Limit steps
+            if not isinstance(action, dict):
+                continue
+
+            tool_id = action.get("tool")
+            if not tool_id or tool_id not in valid_tools:
+                continue  # Filter invalid tool IDs
+
+            args = action.get("args", {})
+            if not isinstance(args, dict):
+                args = {}  # Default missing/invalid args to empty dict
+
+            # Skip if this exact action already exists (remove duplicates)
+            action_key = (tool_id, tuple(sorted(args.items())))
+            if any(
+                (a.get("tool"), tuple(sorted(a.get("args", {}).items()))) == action_key
+                for a in validated
+            ):
+                continue
+
+            validated.append({"tool": tool_id, "args": args})
+
+        return validated
 
     def _format_user_prompt(
         self, state: GameState, utterance: Utterance, candidates: List[ToolCandidate]

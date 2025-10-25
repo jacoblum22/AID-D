@@ -4554,12 +4554,8 @@ class Validator:
                     elif hasattr(exit, "direction"):
                         exit_descriptions.append(f"a passage to the {exit.direction}")
                     elif hasattr(exit, "to"):
-                        # Fallback to destination zone name if available
-                        dest_zone = state.zones.get(exit.to)
-                        if dest_zone and hasattr(dest_zone, "name"):
-                            exit_descriptions.append(f"a path to {dest_zone.name}")
-                        else:
-                            exit_descriptions.append("a way out")
+                        # Fallback - use generic description to avoid leaking hidden zone names
+                        exit_descriptions.append("a passage leading onward")
 
                 if exit_descriptions:
                     if len(exit_descriptions) == 1:
