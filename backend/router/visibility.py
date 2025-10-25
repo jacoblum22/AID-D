@@ -8,12 +8,15 @@ stable JSON schemas for downstream consumers.
 
 from typing import Optional, Dict, Any, List, Union, Literal
 from copy import deepcopy
+import logging
 
 # Import will work since game_state.py is in the same directory
 from .game_state import BaseEntity, Zone, Clock, GameState
 
 # Define redaction roles for different AI contexts
 RedactionRole = Literal["player", "narrator", "gm"]
+
+logger = logging.getLogger(__name__)
 
 
 def can_player_see(pov_id: Optional[str], entity: BaseEntity, world: GameState) -> bool:

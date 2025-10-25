@@ -553,6 +553,14 @@ class Validator:
             # Step 5: Execute tool
             result = self._execute_tool(tool_id, sanitized_args, state, utterance, seed)
 
+            # Step 5.5: Apply outcome resolution to add consequences
+            if result.ok:
+                from .outcome_resolver import (
+                    resolve_outcome,
+                )  # Local import to avoid circular dependency
+
+                result = resolve_outcome(result, state)
+
             # Step 6: Apply effects to state
             if result.ok and result.effects:
                 try:
@@ -644,7 +652,7 @@ class Validator:
     def _execute_ask_roll(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute ask_roll tool - Style+Domain dice mechanics."""
+        """Execute ask_roll tool - Style+Domain dice mechanics with enhanced roll progression."""
         random.seed(seed)
 
         # Extract arguments
@@ -692,6 +700,27 @@ class Validator:
         # Apply advantage/disadvantage to style dice count
         effective_style = max(0, min(3, style + adv_style_delta))
 
+        # Create roll setup information for dramatic presentation
+        actor_name = (
+            "You"
+            if actor == state.current_actor
+            else state.entities[actor].name if actor in state.entities else "Unknown"
+        )
+        roll_description = f"{actor_name} attempt{'' if actor == state.current_actor else 's'} to {action}"
+        if target:
+            target_name = (
+                state.entities[target].name if target in state.entities else target
+            )
+            roll_description += f" against {target_name}"
+
+        roll_setup = {
+            "description": roll_description,
+            "dc": dc,
+            "style_dice_count": effective_style,
+            "domain": domain,
+            "action": action,
+        }
+
         # Roll dice: d20 + sum(effective_style × domain dice)
         d20_roll = random.randint(1, 20)
 
@@ -736,9 +765,10 @@ class Validator:
             outcome, action, actor, target, zone_target, state
         )
 
-        # Create detailed narration hint
+        # Create detailed narration hint with roll progression
         narration_hint = {
             "summary": f"{action.capitalize()} {self._outcome_to_text(outcome)}",
+            "roll_setup": roll_setup,  # Information for pre-roll display
             "dice": {
                 "d20": d20_roll,
                 "style": style_dice,
@@ -751,6 +781,7 @@ class Validator:
             "outcome": outcome,
             "tone_tags": self._get_tone_tags(outcome, action),
             "salient_entities": [actor] + ([target] if target else []),
+            "roll_progression": True,  # Flag to indicate this needs roll presentation
         }
 
         return ToolResult(
@@ -1141,11 +1172,11 @@ class Validator:
                 }
             )
             # Advance alarm clock if it exists
-            if "alarm" in state.clocks:
+            if "scene.alarm" in state.clocks:
                 effects.append(
                     {
                         "type": "clock",
-                        "id": "alarm",  # Use "id" not "target" for clock effects
+                        "id": "scene.alarm",  # Use "id" not "target" for clock effects
                         "delta": 1,
                         "source": actor,
                         "cause": "noisy_movement",
@@ -3992,6 +4023,27 @@ class Validator:
             else:
                 summary = f"{zone.name} appears empty"
 
+        # Add exit information to the summary since users often ask about exits
+        if zone.adjacent_zones:
+            zone_names = []
+            for adj_zone_id in zone.adjacent_zones[:3]:  # Limit to first 3
+                adj_zone = state.zones.get(adj_zone_id)
+                if adj_zone:
+                    zone_names.append(adj_zone.name)
+                else:
+                    zone_names.append(adj_zone_id)
+
+            if zone_names:
+                if len(zone_names) == 1:
+                    summary += f". From here you can reach {zone_names[0]}"
+                elif len(zone_names) == 2:
+                    summary += (
+                        f". From here you can reach {zone_names[0]} and {zone_names[1]}"
+                    )
+                else:
+                    exits_text = ", ".join(zone_names[:-1]) + f", and {zone_names[-1]}"
+                    summary += f". From here you can reach {exits_text}"
+
         # Apply field filtering
         facts = self._filter_fields(facts, fields)
 
@@ -4399,12 +4451,26 @@ class Validator:
         if state.scene:
             scene_tags = getattr(state.scene, "tags", {})
 
+        # Get visible exits for current zone
+        visible_exits = []
+        if current_zone:
+            for exit_info in getattr(current_zone, "exits", []):
+                if getattr(exit_info, "blocked", False):
+                    continue  # Skip blocked exits
+                exit_label = getattr(exit_info, "label", None) or "passage"
+                exit_direction = getattr(exit_info, "direction", None) or ""
+                if exit_direction:
+                    visible_exits.append(f"{exit_label} ({exit_direction})")
+                else:
+                    visible_exits.append(exit_label)
+
         # Create facts dict
         facts = {
             "pov": actor_id,
             "zone": current_zone_id,
             "zone_name": current_zone.name if current_zone else "Unknown Location",
             "visible_entities": visible_entities,
+            "visible_exits": visible_exits,  # Add exit information
             "salient_features": salient_features,
             "scene_tags": scene_tags,
             "topic": topic,
@@ -4460,6 +4526,10 @@ class Validator:
             topic = "look around"
 
         if topic == "look around":
+            # Build description with entities and exits
+            description_parts = [f"You survey {zone_name}."]
+
+            # Add entities if present
             if visible_entities:
                 entity_names = []
                 for entity_id in visible_entities[:2]:  # Limit to first 2 entities
@@ -4471,11 +4541,42 @@ class Validator:
 
                 entities_text = " and ".join(entity_names) if entity_names else ""
                 if entities_text:
-                    return f"You survey {zone_name}. {entities_text} can be seen here."
-                else:
-                    return f"You survey {zone_name}."
-            else:
-                return f"You survey {zone_name}. The area appears quiet."
+                    description_parts.append(f"{entities_text} can be seen here.")
+
+            # Add exits if available
+            if current_zone and hasattr(current_zone, "exits") and current_zone.exits:
+                exit_descriptions = []
+                for exit in current_zone.exits[:3]:  # Limit to first 3 exits
+                    if hasattr(exit, "label") and hasattr(exit, "direction"):
+                        exit_descriptions.append(
+                            f"{exit.label} to the {exit.direction}"
+                        )
+                    elif hasattr(exit, "direction"):
+                        exit_descriptions.append(f"a passage to the {exit.direction}")
+                    elif hasattr(exit, "to"):
+                        # Fallback - use generic description to avoid leaking hidden zone names
+                        exit_descriptions.append("a passage leading onward")
+
+                if exit_descriptions:
+                    if len(exit_descriptions) == 1:
+                        description_parts.append(f"You notice {exit_descriptions[0]}.")
+                    elif len(exit_descriptions) == 2:
+                        description_parts.append(
+                            f"You notice {exit_descriptions[0]} and {exit_descriptions[1]}."
+                        )
+                    else:
+                        exits_text = (
+                            ", ".join(exit_descriptions[:-1])
+                            + f", and {exit_descriptions[-1]}"
+                        )
+                        description_parts.append(f"You notice {exits_text}.")
+
+            # Join all parts
+            return (
+                " ".join(description_parts)
+                if description_parts
+                else f"You survey {zone_name}."
+            )
 
         elif topic == "listen":
             if scene_tags.get("noise") == "loud":
@@ -4496,10 +4597,6 @@ class Validator:
 
         elif topic == "establishing":
             return f"You gather yourself in {zone_name}."
-
-        elif topic.startswith("zoom_in:"):
-            entity_id = topic.split(":", 1)[1]
-            return f"You focus your attention on the nearby presence."
 
         elif topic.startswith("zoom_in:"):
             entity_id = topic.split(":", 1)[1]
@@ -4713,9 +4810,11 @@ class Validator:
         # Generate human-readable summary using resolved delta
         summary = ""
         if ok:
-            target_name = effect.target
-            if "." in target_name:
+            target_name = effect.target or "Unknown"  # Handle None targets
+            if isinstance(target_name, str) and "." in target_name:
                 target_name = target_name.split(".")[-1].title()
+            else:
+                target_name = str(target_name)  # Ensure string type
 
             if effect.type == "hp":
                 if resolved_delta > 0:
@@ -4997,6 +5096,19 @@ class Validator:
         # Update entity position
         updated_entity = entity.model_copy(update={"current_zone": new_zone})
         state.entities[effect.target] = updated_entity
+
+        # Mark new zone as discovered if it's an actor and new_zone is valid
+        if (
+            hasattr(updated_entity, "type")
+            and updated_entity.type in ["pc", "npc"]
+            and new_zone is not None
+        ):
+            from .zone_graph import discover_zone
+
+            discover_zone(effect.target, new_zone, state)
+
+        # Invalidate redaction cache since position affects visibility
+        state.invalidate_cache()
 
         # Update visibility for all actors
         from .effects import _update_visibility
@@ -6221,8 +6333,6 @@ class Validator:
 
             # Create snapshot for rollback if transactional
             snapshot = None
-            if transactional:
-                snapshot = self._create_snapshot(state, effects)
             if transactional:
                 snapshot = self._create_snapshot(state, effects)
 

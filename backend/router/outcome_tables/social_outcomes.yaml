@@ -1,0 +1,95 @@
+# Social Outcome Resolution Table  
+# Maps social interaction outcomes to fictional consequences and mechanical effects
+
+# Actions: persuade, intimidate, deceive, etc.
+# Each outcome affects NPC disposition and scene dynamics
+
+social:
+  crit_success:
+    - description: "Your words strike perfectly. They're completely convinced and willing to help."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: 3
+          disposition_shift: "very_positive"
+        - type: "tag"
+          target: "{target}"
+          add: {"helpful": True}
+      tone_tags: ["social", "masterful", "charming"]
+      
+    - description: "Brilliant! Not only do they agree, but they offer additional assistance."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: 2
+          disposition_shift: "very_positive"
+        - type: "tag"
+          target: "{target}"
+          add: {"ally": True}
+      tone_tags: ["social", "masterful", "diplomatic"]
+
+  success:
+    - description: "They're convinced by your argument and agree to your request."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: 1
+          disposition_shift: "positive"
+      tone_tags: ["social", "successful", "persuasive"]
+      
+    - description: "Your words find their mark. They nod in agreement."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: 1
+          disposition_shift: "positive"
+      tone_tags: ["social", "successful", "convincing"]
+
+  partial:
+    - description: "They're somewhat swayed but remain cautious. You've made progress."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: 0
+          disposition_shift: "neutral"
+        - type: "tag"
+          target: "{target}"
+          add: {"considering": True}
+      tone_tags: ["social", "tentative", "progress"]
+      
+    - description: "You see doubt in their eyes, but they haven't dismissed you outright."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: 0
+          disposition_shift: "neutral"
+      tone_tags: ["social", "uncertain", "mixed"]
+
+  fail:
+    - description: "Your words backfire. They become defensive and suspicious."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: -1
+          disposition_shift: "negative" 
+        - type: "tag"
+          target: "{target}"
+          add: {"suspicious": True}
+        - type: "clock"
+          id: "scene.tension"
+          delta: 2
+      tone_tags: ["social", "failure", "awkward"]
+      
+    - description: "Not only do they refuse, but your approach has made them actively hostile."
+      effects:
+        - type: "mark"
+          target: "{target}"
+          style_bonus: -2
+          disposition_shift: "very_negative"
+        - type: "tag"
+          target: "{target}"
+          add: {"hostile": True}
+        - type: "clock"
+          id: "scene.tension"
+          delta: 3
+      tone_tags: ["social", "failure", "confrontational"]
