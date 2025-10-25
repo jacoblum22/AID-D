@@ -46,7 +46,7 @@ class SchemaIntrospector:
         args = get_args(field_type)
 
         # Check for Literal types
-        if origin is not None and "Literal" in str(origin):
+        if origin is Literal:
             constraints["type"] = "literal"
             constraints["choices"] = list(args)
             return constraints
@@ -62,15 +62,15 @@ class SchemaIntrospector:
                 constraints["optional"] = True
 
                 # Check if the remaining type is Literal
-                if origin is not None and "Literal" in str(origin):
+                if origin is Literal:
                     constraints["type"] = "literal"
                     constraints["choices"] = list(get_args(field_type))
                     return constraints
 
-        # Handle basic types
-        if field_type == str:
+        # Handle basic types - use 'is' for builtins
+        if field_type is str:
             constraints["type"] = "string"
-        elif field_type == int:
+        elif field_type is int:
             constraints["type"] = "integer"
 
             # Extract range constraints from metadata
@@ -87,9 +87,9 @@ class SchemaIntrospector:
             if "max" not in constraints:
                 constraints["max"] = 10
 
-        elif field_type == float:
+        elif field_type is float:
             constraints["type"] = "number"
-        elif field_type == bool:
+        elif field_type is bool:
             constraints["type"] = "boolean"
             constraints["choices"] = [True, False]
         elif origin is list or field_type == list:
@@ -99,8 +99,8 @@ class SchemaIntrospector:
         if hasattr(field_info, "default") and field_info.default is not None:
             constraints["default"] = field_info.default
 
-        # Mark as required if needed
-        if hasattr(field_info, "is_required") and field_info.is_required():
+        # Mark as required if needed - Pydantic v2: is_required is a property, not a method
+        if hasattr(field_info, "is_required") and field_info.is_required:
             constraints["required"] = True
         elif hasattr(field_info, "required") and field_info.required:
             constraints["required"] = True
@@ -522,6 +522,7 @@ Return ONLY a JSON object with "tool_calls" field:
                     "input": f"{system_prompt}\n\n{user_prompt}",
                     "reasoning": {"effort": "minimal"},  # Fast responses for planning
                     "text": {"verbosity": "low"},  # Concise outputs
+                    "max_output_tokens": self.max_tokens,  # Set token limit for Responses API
                 }
 
                 response = self.client.responses.create(**api_params)
@@ -534,7 +535,7 @@ Return ONLY a JSON object with "tool_calls" field:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "max_completion_tokens": self.max_tokens,
+                    "max_tokens": self.max_tokens,  # Correct parameter name for Chat Completions
                     "temperature": self.temperature,
                     "response_format": {"type": "json_object"},
                 }

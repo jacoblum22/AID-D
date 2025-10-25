@@ -166,10 +166,12 @@ class GameRouter:
                         logger.info(
                             f"Staged planner: compound action with {len(action_sequence_data)} steps"
                         )
-                    else:
+                    elif action_sequence_data:  # Guard against empty list
                         logger.info(
                             f"Staged planner: single action: {action_sequence_data[0]['tool']}"
                         )
+                    else:
+                        logger.warning("Staged planner: received empty action sequence")
 
             else:
                 # Use legacy monolithic planner
@@ -190,10 +192,12 @@ class GameRouter:
                         logger.info(
                             f"Legacy planner: compound action with {len(action_sequence_data)} steps"
                         )
-                    else:
+                    elif action_sequence_data:  # Guard against empty list
                         logger.info(
                             f"Legacy planner: single action: {action_sequence_data[0]['tool']}"
                         )
+                    else:
+                        logger.warning("Legacy planner: received empty action sequence")
 
             # Step 2: Execute action sequence
             all_tool_results = []

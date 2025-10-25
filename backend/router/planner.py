@@ -24,6 +24,7 @@ from tenacity import (
 
 from .game_state import GameState, Utterance, PC, NPC
 from .affordances import ToolCandidate, get_tool_candidates
+from .tool_catalog import TOOL_CATALOG
 
 
 # Set up logging
@@ -92,8 +93,16 @@ Required JSON format:
   "confidence": 0.85
 }"""
 
+        # Generate list of compound-eligible tools (exclude internal-only tools)
+        compound_eligible_tools = [
+            tool.id
+            for tool in TOOL_CATALOG
+            if tool.id != "apply_effects"  # Exclude internal-only tools
+        ]
+        tool_list_str = ", ".join(compound_eligible_tools)
+
         # System prompt for compound action parsing
-        self.compound_system_prompt = """You are a Compound Action Parser for an AI D&D game. Your job is to detect if player input contains multiple sequential actions and break them into an ordered list.
+        self.compound_system_prompt = f"""You are a Compound Action Parser for an AI D&D game. Your job is to detect if player input contains multiple sequential actions and break them into an ordered list.
 
 DETECTION RULES:
 - Look for connecting words: "and", "then", "after", "before", "while"
@@ -103,9 +112,9 @@ DETECTION RULES:
 
 OUTPUT RULES:
 - Return ONLY valid JSON
-- If single action: {"is_compound": false, "actions": [{"tool": "tool_id", "args": {...}}]}
-- If multiple actions: {"is_compound": true, "actions": [{"tool": "tool1", "args": {...}}, {"tool": "tool2", "args": {...}}]}
-- Use these tool IDs: narrate_only, move, talk, attack, use_item, get_info, ask_roll, ask_clarifying
+- If single action: {{"is_compound": false, "actions": [{{"tool": "tool_id", "args": {{...}}}}]}}
+- If multiple actions: {{"is_compound": true, "actions": [{{"tool": "tool1", "args": {{...}}}}, {{"tool": "tool2", "args": {{...}}}}]}}
+- Use these tool IDs: {tool_list_str}
 - Common patterns:
   * "look around" → narrate_only with topic: "look around"
   * "move to X" → move with to: "X"
@@ -116,14 +125,14 @@ OUTPUT RULES:
   * "drink potion" → use_item with method: "consume"
 
 Required JSON format:
-{
+{{
   "is_compound": true/false,
   "actions": [
-    {"tool": "tool_id", "args": {"key": "value"}},
-    {"tool": "tool_id", "args": {"key": "value"}}
+    {{"tool": "tool_id", "args": {{"key": "value"}}}},
+    {{"tool": "tool_id", "args": {{"key": "value"}}}}
   ],
   "confidence": 0.85
-}"""
+}}"""
 
     def get_plan(
         self, state: GameState, utterance: Utterance, debug: bool = False
@@ -396,6 +405,7 @@ Choose the most appropriate tool and return JSON only."""
                     "input": f"{system_prompt}\n\n{user_prompt}",
                     "reasoning": {"effort": "minimal"},  # Fast responses for planning
                     "text": {"verbosity": "low"},  # Concise outputs
+                    "max_output_tokens": self.max_tokens,  # Set token limit for Responses API
                 }
 
                 response = self.client.responses.create(**api_params)
@@ -408,7 +418,7 @@ Choose the most appropriate tool and return JSON only."""
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "max_completion_tokens": self.max_tokens,
+                    "max_tokens": self.max_tokens,  # Correct parameter name for Chat Completions
                     "temperature": self.temperature,
                     "response_format": {"type": "json_object"},  # Force JSON response
                 }

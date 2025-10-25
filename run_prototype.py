@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
 Startup script for AID&D prototype.
+
+To run:
+    python run_prototype.py [options]
+
+Example usage:
+    python run_prototype.py --new-game --debug
+    python run_prototype.py --world custom_world.json
+    $env:SHOW_PROMPTS="1"; python run_prototype.py --debug
+
 Run this from the project root directory.
 """
 

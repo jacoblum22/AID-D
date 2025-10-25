@@ -114,24 +114,22 @@ class NarrationGenerator:
             # DEBUG: Log the full prompt being sent to GPT-5
             full_input = f"{self.system_prompt}\n\n{user_prompt}"
 
-            # Use INFO level for prompt debugging if explicitly requested, otherwise DEBUG
-            prompt_log_level = (
-                logging.INFO if os.getenv("SHOW_PROMPTS") else logging.DEBUG
-            )
-            logger.log(prompt_log_level, f"🎭 ===== FULL PROMPT DEBUG =====")
-            logger.log(
-                prompt_log_level,
-                f"🎭 SYSTEM PROMPT ({len(self.system_prompt)} chars): {self.system_prompt}",
-            )
-            logger.log(
-                prompt_log_level,
-                f"🎭 USER PROMPT ({len(user_prompt)} chars): {user_prompt}",
-            )
-            logger.log(
-                prompt_log_level,
-                f"🎭 FULL INPUT ({len(full_input)} chars): {full_input[:300]}...",
-            )
-            logger.log(prompt_log_level, f"🎭 ===== END PROMPT DEBUG =====")
+            # Gate full prompt logging behind SHOW_PROMPTS to prevent content leaks
+            if os.getenv("SHOW_PROMPTS"):
+                logger.info("🎭 ===== FULL PROMPT DEBUG =====")
+                logger.info(
+                    f"🎭 SYSTEM PROMPT ({len(self.system_prompt)} chars): {self.system_prompt}"
+                )
+                logger.info(f"🎭 USER PROMPT ({len(user_prompt)} chars): {user_prompt}")
+                logger.info(
+                    f"🎭 FULL INPUT ({len(full_input)} chars): {full_input[:300]}..."
+                )
+                logger.info("🎭 ===== END PROMPT DEBUG =====")
+            else:
+                # Only log non-sensitive metadata
+                logger.debug(
+                    f"🎭 PROMPT DIGEST: system={len(self.system_prompt)} chars, user={len(user_prompt)} chars"
+                )
 
             # DEBUG: Log which model and settings are being used
             logger.debug(
@@ -190,7 +188,8 @@ class NarrationGenerator:
                 return result.narration_hint.get("summary", "Something happens.")
 
         except Exception as e:
-            logger.error(f"Narration generation failed: {e}")
+            # Log with stack trace for better debugging
+            logger.exception("Narration generation failed")
             # Fallback to original summary
             return result.narration_hint.get("summary", "Something happens.")
 

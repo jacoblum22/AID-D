@@ -553,6 +553,14 @@ class Validator:
             # Step 5: Execute tool
             result = self._execute_tool(tool_id, sanitized_args, state, utterance, seed)
 
+            # Step 5.5: Apply outcome resolution to add consequences
+            if result.ok:
+                from .outcome_resolver import (
+                    resolve_outcome,
+                )  # Local import to avoid circular dependency
+
+                result = resolve_outcome(result, state)
+
             # Step 6: Apply effects to state
             if result.ok and result.effects:
                 try:
@@ -1164,11 +1172,11 @@ class Validator:
                 }
             )
             # Advance alarm clock if it exists
-            if "alarm" in state.clocks:
+            if "scene.alarm" in state.clocks:
                 effects.append(
                     {
                         "type": "clock",
-                        "id": "alarm",  # Use "id" not "target" for clock effects
+                        "id": "scene.alarm",  # Use "id" not "target" for clock effects
                         "delta": 1,
                         "source": actor,
                         "cause": "noisy_movement",
@@ -4598,10 +4606,6 @@ class Validator:
             entity_id = topic.split(":", 1)[1]
             return f"You focus your attention on the nearby presence."
 
-        elif topic.startswith("zoom_in:"):
-            entity_id = topic.split(":", 1)[1]
-            return f"You focus your attention on the nearby presence."
-
         else:
             return f"You observe {zone_name}."
 
@@ -4810,9 +4814,11 @@ class Validator:
         # Generate human-readable summary using resolved delta
         summary = ""
         if ok:
-            target_name = effect.target
-            if "." in target_name:
+            target_name = effect.target or "Unknown"  # Handle None targets
+            if isinstance(target_name, str) and "." in target_name:
                 target_name = target_name.split(".")[-1].title()
+            else:
+                target_name = str(target_name)  # Ensure string type
 
             if effect.type == "hp":
                 if resolved_delta > 0:
@@ -6331,8 +6337,6 @@ class Validator:
 
             # Create snapshot for rollback if transactional
             snapshot = None
-            if transactional:
-                snapshot = self._create_snapshot(state, effects)
             if transactional:
                 snapshot = self._create_snapshot(state, effects)
 

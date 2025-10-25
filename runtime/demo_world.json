@@ -5,7 +5,7 @@
       "name": "Arin",
       "type": "pc",
       "current_zone": "courtyard",
-      "visible_actors": ["npc.guard"],
+      "visible_actors": [],
       "has_weapon": true,
       "inventory": ["rope", "healing_potion"],
       "hp": {
