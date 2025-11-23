@@ -1,0 +1,1226 @@
+[
+  {
+    "timestamp": "2025-11-14T03:19:01.691921",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 4067,
+    "cache_percentage": 88.12392426850259
+  },
+  {
+    "timestamp": "2025-11-14T03:19:39.743941",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1536,
+    "total_tokens": 2713,
+    "cache_percentage": 56.616291927755256
+  },
+  {
+    "timestamp": "2025-11-14T03:19:51.850527",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1536,
+    "total_tokens": 2188,
+    "cache_percentage": 70.20109689213893
+  },
+  {
+    "timestamp": "2025-11-14T03:23:19.992196",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1408,
+    "total_tokens": 3178,
+    "cache_percentage": 44.30459408432977
+  },
+  {
+    "timestamp": "2025-11-14T03:23:31.074271",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2393,
+    "cache_percentage": 58.838278311742584
+  },
+  {
+    "timestamp": "2025-11-14T03:25:04.612641",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 3976,
+    "cache_percentage": 90.14084507042254
+  },
+  {
+    "timestamp": "2025-11-14T03:25:59.404117",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1664,
+    "total_tokens": 3561,
+    "cache_percentage": 46.72844706543106
+  },
+  {
+    "timestamp": "2025-11-14T03:26:11.313472",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1664,
+    "total_tokens": 2402,
+    "cache_percentage": 69.27560366361367
+  },
+  {
+    "timestamp": "2025-11-14T04:00:14.996737",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1408,
+    "total_tokens": 4041,
+    "cache_percentage": 34.84286067804999
+  },
+  {
+    "timestamp": "2025-11-14T04:06:30.238733",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1536,
+    "total_tokens": 4439,
+    "cache_percentage": 34.602387925208376
+  },
+  {
+    "timestamp": "2025-11-14T04:06:41.132688",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1536,
+    "total_tokens": 2613,
+    "cache_percentage": 58.78300803673938
+  },
+  {
+    "timestamp": "2025-11-14T17:43:27.333025",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 4032,
+    "cache_percentage": 88.88888888888889
+  },
+  {
+    "timestamp": "2025-11-14T17:43:43.339151",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1792,
+    "total_tokens": 4389,
+    "cache_percentage": 40.82934609250399
+  },
+  {
+    "timestamp": "2025-11-14T17:43:52.506050",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1536,
+    "total_tokens": 2531,
+    "cache_percentage": 60.68747530620308
+  },
+  {
+    "timestamp": "2025-11-14T17:46:46.733805",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 3933,
+    "cache_percentage": 91.12636664124079
+  },
+  {
+    "timestamp": "2025-11-14T17:47:07.808181",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1408,
+    "total_tokens": 4376,
+    "cache_percentage": 32.17550274223035
+  },
+  {
+    "timestamp": "2025-11-14T17:50:31.215084",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 4012,
+    "cache_percentage": 89.3320039880359
+  },
+  {
+    "timestamp": "2025-11-14T17:51:07.629482",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1536,
+    "total_tokens": 4710,
+    "cache_percentage": 32.611464968152866
+  },
+  {
+    "timestamp": "2025-11-14T17:53:33.988975",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 4037,
+    "cache_percentage": 88.77879613574436
+  },
+  {
+    "timestamp": "2025-11-14T17:53:55.373453",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1408,
+    "total_tokens": 4561,
+    "cache_percentage": 30.870423152817366
+  },
+  {
+    "timestamp": "2025-11-14T17:54:06.768664",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2899,
+    "cache_percentage": 48.56847188685754
+  },
+  {
+    "timestamp": "2025-11-14T17:57:32.796616",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3584,
+    "total_tokens": 3913,
+    "cache_percentage": 91.59212880143113
+  },
+  {
+    "timestamp": "2025-11-14T17:58:01.751231",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1920,
+    "total_tokens": 4812,
+    "cache_percentage": 39.900249376558605
+  },
+  {
+    "timestamp": "2025-11-14T17:58:11.549992",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 3315,
+    "cache_percentage": 42.473604826546
+  },
+  {
+    "timestamp": "2025-11-14T18:28:24.983172",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 1638,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:28:35.591961",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2026,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:31:18.724318",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4525,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:31:25.286052",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 875,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:31:47.947131",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 0,
+    "total_tokens": 2431,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:31:58.155060",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2314,
+    "cache_percentage": 60.847018150388934
+  },
+  {
+    "timestamp": "2025-11-14T18:34:43.270146",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4506,
+    "cache_percentage": 88.06036395916556
+  },
+  {
+    "timestamp": "2025-11-14T18:34:47.321535",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 889,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:35:15.628314",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1536,
+    "total_tokens": 3089,
+    "cache_percentage": 49.72483004208482
+  },
+  {
+    "timestamp": "2025-11-14T18:35:24.255806",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2485,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:41:29.309048",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4533,
+    "cache_percentage": 87.53584822413413
+  },
+  {
+    "timestamp": "2025-11-14T18:41:33.693850",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 915,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:41:51.983887",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1664,
+    "total_tokens": 3769,
+    "cache_percentage": 44.149641814804994
+  },
+  {
+    "timestamp": "2025-11-14T18:42:01.742936",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2487,
+    "cache_percentage": 56.614394853236824
+  },
+  {
+    "timestamp": "2025-11-14T18:45:49.201942",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4434,
+    "cache_percentage": 89.49030221019395
+  },
+  {
+    "timestamp": "2025-11-14T18:45:53.887389",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 825,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T18:46:29.347955",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 2048,
+    "total_tokens": 4253,
+    "cache_percentage": 48.154244063014346
+  },
+  {
+    "timestamp": "2025-11-14T18:46:43.954373",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1920,
+    "total_tokens": 2530,
+    "cache_percentage": 75.8893280632411
+  },
+  {
+    "timestamp": "2025-11-14T19:06:40.647830",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4446,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:06:45.435349",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 831,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:07:41.773142",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 0,
+    "total_tokens": 4794,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:07:53.298407",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2722,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:11:08.718082",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4543,
+    "cache_percentage": 87.34316530926701
+  },
+  {
+    "timestamp": "2025-11-14T19:11:15.461057",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 924,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:11:37.705172",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 0,
+    "total_tokens": 5039,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:11:48.466869",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2821,
+    "cache_percentage": 49.91137894363701
+  },
+  {
+    "timestamp": "2025-11-14T19:13:17.225265",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4424,
+    "cache_percentage": 89.69258589511753
+  },
+  {
+    "timestamp": "2025-11-14T19:13:23.467724",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 811,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:14:01.869712",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 0,
+    "total_tokens": 5021,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:14:15.414653",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 3003,
+    "cache_percentage": 46.88644688644688
+  },
+  {
+    "timestamp": "2025-11-14T19:19:48.671617",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4536,
+    "cache_percentage": 87.47795414462081
+  },
+  {
+    "timestamp": "2025-11-14T19:19:54.713320",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 918,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:20:18.984398",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1536,
+    "total_tokens": 4990,
+    "cache_percentage": 30.781563126252504
+  },
+  {
+    "timestamp": "2025-11-14T19:20:26.598739",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2810,
+    "cache_percentage": 50.1067615658363
+  },
+  {
+    "timestamp": "2025-11-14T19:22:07.804308",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4388,
+    "cache_percentage": 90.42844120328168
+  },
+  {
+    "timestamp": "2025-11-14T19:22:12.210791",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 809,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T19:22:38.925823",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1536,
+    "total_tokens": 4804,
+    "cache_percentage": 31.973355537052456
+  },
+  {
+    "timestamp": "2025-11-14T19:22:46.544724",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2743,
+    "cache_percentage": 51.33065986146554
+  },
+  {
+    "timestamp": "2025-11-14T20:18:02.197975",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4520,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T20:18:06.311247",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 911,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T20:18:49.685874",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 0,
+    "total_tokens": 5098,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T20:18:54.833463",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2857,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T20:20:19.939114",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4382,
+    "cache_percentage": 90.55225924235509
+  },
+  {
+    "timestamp": "2025-11-14T20:20:24.432013",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 766,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T20:21:04.664718",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1792,
+    "total_tokens": 5061,
+    "cache_percentage": 35.40802213001383
+  },
+  {
+    "timestamp": "2025-11-14T20:21:12.055111",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1536,
+    "total_tokens": 3078,
+    "cache_percentage": 49.902534113060426
+  },
+  {
+    "timestamp": "2025-11-14T20:25:20.690643",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4504,
+    "cache_percentage": 88.09946714031972
+  },
+  {
+    "timestamp": "2025-11-14T20:25:24.648536",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 924,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-14T20:26:17.454477",
+    "source": "DM_Narrator",
+    "model": "gpt-5",
+    "cached_tokens": 1920,
+    "total_tokens": 5250,
+    "cache_percentage": 36.57142857142857
+  },
+  {
+    "timestamp": "2025-11-14T20:26:27.666566",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1536,
+    "total_tokens": 3518,
+    "cache_percentage": 43.66117111995452
+  },
+  {
+    "timestamp": "2025-11-15T00:04:38.733492",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 1638,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:04:52.457833",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 1969,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:14:27.518254",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4473,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:14:31.873880",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 823,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:14:46.464679",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 2472,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:14:58.596577",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2302,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:16:50.937094",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4404,
+    "cache_percentage": 90.09990917347865
+  },
+  {
+    "timestamp": "2025-11-15T00:16:54.972281",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 754,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:17:05.300726",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 2789,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:17:14.712632",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2187,
+    "cache_percentage": 64.38042981252859
+  },
+  {
+    "timestamp": "2025-11-15T00:22:56.743365",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4344,
+    "cache_percentage": 91.34438305709024
+  },
+  {
+    "timestamp": "2025-11-15T00:23:00.632788",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 694,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:23:14.087980",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 3196,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:23:19.609752",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2334,
+    "cache_percentage": 60.32562125107113
+  },
+  {
+    "timestamp": "2025-11-15T00:27:32.591988",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4456,
+    "cache_percentage": 89.04847396768402
+  },
+  {
+    "timestamp": "2025-11-15T00:27:36.249870",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 870,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:28:13.134117",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 3744,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:28:24.134698",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 3042,
+    "cache_percentage": 46.2853385930309
+  },
+  {
+    "timestamp": "2025-11-15T00:46:16.269393",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 5094,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:46:19.482591",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 1480,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:46:34.768001",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 4737,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:46:44.769177",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2370,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:50:14.775628",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4510,
+    "cache_percentage": 87.98226164079823
+  },
+  {
+    "timestamp": "2025-11-15T00:50:17.499847",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 893,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:50:28.348335",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 4984,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:50:36.341147",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2450,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:58:50.806642",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4413,
+    "cache_percentage": 89.9161568094267
+  },
+  {
+    "timestamp": "2025-11-15T00:58:54.739355",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 795,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:59:04.476100",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 5114,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T00:59:11.823672",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2543,
+    "cache_percentage": 55.367675973259935
+  },
+  {
+    "timestamp": "2025-11-15T01:00:44.780514",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4413,
+    "cache_percentage": 89.9161568094267
+  },
+  {
+    "timestamp": "2025-11-15T01:00:49.269349",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 795,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:00:56.875001",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 5195,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:01:02.299287",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2484,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:03:39.134578",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4388,
+    "cache_percentage": 90.42844120328168
+  },
+  {
+    "timestamp": "2025-11-15T01:03:46.288872",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 814,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:03:56.236980",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 5206,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:04:04.121350",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2603,
+    "cache_percentage": 54.09143296196696
+  },
+  {
+    "timestamp": "2025-11-15T01:06:34.563403",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4442,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:06:38.983693",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 826,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:06:48.455233",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 4411,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:06:57.677030",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2414,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:08:21.249605",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4411,
+    "cache_percentage": 89.9569258671503
+  },
+  {
+    "timestamp": "2025-11-15T01:08:26.989009",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 789,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:08:35.899434",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 4867,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:08:45.405852",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2499,
+    "cache_percentage": 56.34253701480593
+  },
+  {
+    "timestamp": "2025-11-15T01:14:25.532929",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4412,
+    "cache_percentage": 89.93653671804171
+  },
+  {
+    "timestamp": "2025-11-15T01:14:29.133448",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 792,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:14:39.663586",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 4480,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:14:45.799344",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2696,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:20:25.764525",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4514,
+    "cache_percentage": 87.90429774036332
+  },
+  {
+    "timestamp": "2025-11-15T01:20:32.056439",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 897,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:20:46.879095",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 5779,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T01:20:55.749735",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2849,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:01:55.611865",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4561,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:02:01.228980",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 948,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:02:12.035875",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 4873,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:02:18.845932",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 2892,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:04:23.933987",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4518,
+    "cache_percentage": 87.82647189021691
+  },
+  {
+    "timestamp": "2025-11-15T02:04:29.980126",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 897,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:04:39.481813",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 5017,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:04:47.052462",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 2873,
+    "cache_percentage": 49.00800556909154
+  },
+  {
+    "timestamp": "2025-11-15T02:07:27.875526",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 4436,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:07:32.240166",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 818,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:07:45.174607",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 1792,
+    "total_tokens": 5342,
+    "cache_percentage": 33.545488581055785
+  },
+  {
+    "timestamp": "2025-11-15T02:07:54.272815",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 3273,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:09:33.511814",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4544,
+    "cache_percentage": 87.32394366197182
+  },
+  {
+    "timestamp": "2025-11-15T02:09:48.057005",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 5998,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:09:54.060034",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 3279,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:11:32.093670",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4454,
+    "cache_percentage": 89.08845981140547
+  },
+  {
+    "timestamp": "2025-11-15T02:11:35.847568",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 832,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:11:46.297526",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 1792,
+    "total_tokens": 5626,
+    "cache_percentage": 31.852115179523636
+  },
+  {
+    "timestamp": "2025-11-15T02:11:52.998280",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1408,
+    "total_tokens": 3426,
+    "cache_percentage": 41.09748978400467
+  },
+  {
+    "timestamp": "2025-11-15T02:13:58.209701",
+    "source": "Roll_Analyzer",
+    "model": "gpt-5-nano",
+    "cached_tokens": 3968,
+    "total_tokens": 4524,
+    "cache_percentage": 87.70999115826702
+  },
+  {
+    "timestamp": "2025-11-15T02:14:01.407961",
+    "source": "Lore_Retrieval",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 908,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-15T02:14:16.356974",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 1792,
+    "total_tokens": 5825,
+    "cache_percentage": 30.763948497854077
+  },
+  {
+    "timestamp": "2025-11-15T02:14:26.585863",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 1536,
+    "total_tokens": 4010,
+    "cache_percentage": 38.30423940149626
+  },
+  {
+    "timestamp": "2025-11-21T00:23:37.197652",
+    "source": "DM_Narrator",
+    "model": "gpt-5.1",
+    "cached_tokens": 0,
+    "total_tokens": 1638,
+    "cache_percentage": 0.0
+  },
+  {
+    "timestamp": "2025-11-21T00:23:57.279464",
+    "source": "Lore_Extractor",
+    "model": "gpt-5-nano",
+    "cached_tokens": 0,
+    "total_tokens": 1975,
+    "cache_percentage": 0.0
+  }
+]

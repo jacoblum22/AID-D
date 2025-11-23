@@ -652,7 +652,7 @@ class Validator:
     def _execute_ask_roll(
         self, args: Dict[str, Any], state: GameState, utterance: Utterance, seed: int
     ) -> ToolResult:
-        """Execute ask_roll tool - Style+Domain dice mechanics with enhanced roll progression."""
+        """Execute ask_roll tool - d20 + Domain + Style dice mechanics."""
         random.seed(seed)
 
         # Extract arguments
@@ -660,10 +660,15 @@ class Validator:
         action = args.get("action", "custom")
         target = args.get("target")
         zone_target = args.get("zone_target")
-        style = args.get("style", 1)
-        domain = args.get("domain", "d6")
+
+        # NEW: Domain and Style names (e.g., "physical", "graceful")
+        domain_name = str(
+            args.get("domain", "physical")
+        ).lower()  # physical/mental/social/insight
+        style_name = str(
+            args.get("style", "forceful")
+        ).lower()  # forceful/subtle/precise/clever/resilient/graceful/chaotic
         dc_hint = args.get("dc_hint", 12)
-        adv_style_delta = args.get("adv_style_delta", 0)
 
         # Validate zone_target is adjacent to current zone if provided
         if zone_target and actor:
@@ -691,21 +696,60 @@ class Validator:
                         error_message=f"Zone target '{zone_target}' is not adjacent to current zone '{current_actor.current_zone}'",
                     )
 
+        # Get actor's stats
+        if actor not in state.entities:
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={
+                    "question": f"I can't find the actor '{actor}' to roll for them."
+                },
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to missing actor",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' not found",
+            )
+
+        actor_entity = state.entities[actor]
+        if actor_entity.type not in ("pc", "npc"):
+            return ToolResult(
+                ok=False,
+                tool_id="ask_clarifying",
+                args={"question": f"{actor_entity.name} can't perform skill checks."},
+                facts={},
+                effects=[],
+                narration_hint={
+                    "summary": "Asked for clarification due to invalid actor type",
+                    "tone_tags": ["helpful"],
+                    "salient_entities": [],
+                },
+                error_message=f"Actor '{actor}' is not a PC or NPC",
+            )
+
+        # Type cast for stats access
+        from .game_state import PC, NPC
+
+        actor_stats = cast(Union[PC, NPC], actor_entity).stats
+
+        # Get Domain rating (number of dice) from actor stats
+        domain_rating = getattr(actor_stats, domain_name, 2)  # Default to 2
+
+        # Get Style rating (die size: 0, 4, 6, 8) from actor stats
+        # NOTE: Only ONE style can be 8 (signature), rest max at 6
+        style_die_size = getattr(actor_stats, style_name, 0)  # Default to 0 (untrained)
+
         # Derive DC from scene tags if dc_hint wasn't provided
         if dc_hint == 12:  # Default value, derive from scene
             dc = self._derive_dc(action, state.scene)
         else:
             dc = dc_hint
 
-        # Apply advantage/disadvantage to style dice count
-        effective_style = max(0, min(3, style + adv_style_delta))
-
         # Create roll setup information for dramatic presentation
-        actor_name = (
-            "You"
-            if actor == state.current_actor
-            else state.entities[actor].name if actor in state.entities else "Unknown"
-        )
+        actor_name = "You" if actor == state.current_actor else actor_entity.name
         roll_description = f"{actor_name} attempt{'' if actor == state.current_actor else 's'} to {action}"
         if target:
             target_name = (
@@ -716,49 +760,43 @@ class Validator:
         roll_setup = {
             "description": roll_description,
             "dc": dc,
-            "style_dice_count": effective_style,
-            "domain": domain,
+            "domain": domain_name.capitalize(),
+            "domain_rating": domain_rating,
+            "style": style_name.capitalize(),
+            "style_die_size": style_die_size,
             "action": action,
         }
 
-        # Roll dice: d20 + sum(effective_style × domain dice)
+        # Roll dice: d20 + sum(domain_rating × style_die_size dice)
+        # NOTE: If style_die_size is 0, no domain dice are rolled
         d20_roll = random.randint(1, 20)
-
-        # Parse domain die size with defensive error handling
-        try:
-            if not domain.startswith("d") or not domain[1:].isdigit():
-                raise ValueError(f"Invalid domain format: {domain}")
-            domain_size = int(domain[1:])  # "d6" -> 6
-        except (ValueError, IndexError) as e:
-            return ToolResult(
-                ok=False,
-                tool_id="ask_clarifying",
-                args={
-                    "question": f"I don't understand the dice format '{domain}'. Please use format like 'd6' or 'd20'."
-                },
-                facts={},
-                effects=[],
-                narration_hint={
-                    "summary": "Asked for clarification due to invalid dice format",
-                    "tone_tags": ["helpful"],
-                    "salient_entities": [],
-                },
-                error_message=f"Invalid domain format: {domain}",
-            )
-        style_dice = [random.randint(1, domain_size) for _ in range(effective_style)]
-        style_sum = sum(style_dice)
-        total = d20_roll + style_sum
-
-        # Calculate margin and determine outcome
-        margin = total - dc
-        if d20_roll == 20 or margin >= 5:
-            outcome = "crit_success"
-        elif margin >= 0:
-            outcome = "success"
-        elif margin >= -3:
-            outcome = "partial"
+        if style_die_size == 0:
+            domain_dice = []  # No dice rolled when untrained
+            domain_sum = 0
         else:
+            domain_dice = [
+                random.randint(1, style_die_size) for _ in range(domain_rating)
+            ]
+            domain_sum = sum(domain_dice)
+        total = d20_roll + domain_sum
+
+        # Calculate margin and determine outcome band
+        margin = total - dc
+        if margin < 0:
             outcome = "fail"
+            outcome_band = "Fail"
+        elif margin <= 2:
+            outcome = "success"
+            outcome_band = "Mixed"  # Success with cost/complication
+        elif margin <= 6:
+            outcome = "success"
+            outcome_band = "Clean"
+        elif margin <= 11:
+            outcome = "success"
+            outcome_band = "Strong"
+        else:
+            outcome = "success"
+            outcome_band = "Dramatic"
 
         # Generate effects based on outcome and action
         effects = self._generate_ask_roll_effects(
@@ -767,18 +805,20 @@ class Validator:
 
         # Create detailed narration hint with roll progression
         narration_hint = {
-            "summary": f"{action.capitalize()} {self._outcome_to_text(outcome)}",
+            "summary": f"{action.capitalize()} - {outcome_band}",
             "roll_setup": roll_setup,  # Information for pre-roll display
             "dice": {
                 "d20": d20_roll,
-                "style": style_dice,
-                "style_sum": style_sum,
+                "domain_dice": domain_dice,
+                "domain_sum": domain_sum,
                 "total": total,
                 "dc": dc,
                 "margin": margin,
-                "effective_style": effective_style,
+                "domain_rating": domain_rating,
+                "style_die_size": style_die_size,
             },
             "outcome": outcome,
+            "outcome_band": outcome_band,
             "tone_tags": self._get_tone_tags(outcome, action),
             "salient_entities": [actor] + ([target] if target else []),
             "roll_progression": True,  # Flag to indicate this needs roll presentation
@@ -790,10 +830,11 @@ class Validator:
             args=args,
             facts={
                 "outcome": outcome,
+                "outcome_band": outcome_band,
                 "margin": margin,
                 "total": total,
                 "dc": dc,
-                "style_dice": style_dice,
+                "domain_dice": domain_dice,
             },
             effects=effects,
             narration_hint=narration_hint,
@@ -1113,8 +1154,8 @@ class Validator:
                             "actor": actor,
                             "action": "sneak",
                             "zone_target": to_zone,
-                            "style": 1,
-                            "domain": "d6",
+                            "style": "subtle",  # Use semantic name instead of int
+                            "domain": "physical",  # Use semantic name instead of "d6"
                             "dc_hint": 10 + alert_level,
                             "context": f"Moving stealthily to {target_zone.name}",
                         },
