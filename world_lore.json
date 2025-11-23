@@ -1,0 +1,97 @@
+{
+  "entries": [
+    {
+      "type": "location",
+      "name": "Bramblegate",
+      "tags": [
+        "village",
+        "hollowmere",
+        "danger_low"
+      ],
+      "full_text": "Bramblegate is a small village perched at the edge of Hollowmere Road. Lanterns burn fitfully on crooked posts while shutters are bolted and doors barred; the square empties at the slightest hint of trouble. Its inhabitants speak in hushed tones of the road ahead, where the forest has grown as protective and sinister as a living wall.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_001"
+    },
+    {
+      "type": "location",
+      "name": "Hollowmere Road",
+      "tags": [
+        "road",
+        "forest",
+        "hollowmere",
+        "danger_medium"
+      ],
+      "full_text": "Hollowmere Road threads from Bramblegate into a fog-drowned forest, its path vanishing into a curtain of mist that glows faintly blue with every distant lightning flash. The air is damp and heavy, and the only sounds are rain, the lantern creak, and the wind slipping through wet leaves. Travelers feel watched as shadows flicker between trunks and will-o’-wisps weave in and out of the fog.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_002"
+    },
+    {
+      "type": "location",
+      "name": "Old shrine in Hollowmere",
+      "tags": [
+        "shrine",
+        "haunted",
+        "hollowmere"
+      ],
+      "full_text": "The old shrine sits deep within the Hollowmere, its stones mossed and weather-beaten. Locals whisper that it calls to sleepers and that the bells toll from the fog without human hands to strike them, drawing the curious toward the mist where voices speak in the night.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_003"
+    },
+    {
+      "type": "npc",
+      "name": "Innkeeper",
+      "tags": [
+        "npc",
+        "human",
+        "innkeeper",
+        "informant"
+      ],
+      "full_text": "The innkeeper of Bramblegate is an aged, pipe-smoked man whose lungs wheeze with each word. He warns that better-armed folk have vanished along Hollowmere Road and that the lights in the forest persist to lure travelers onward, especially when the bells ring.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_004"
+    },
+    {
+      "type": "npc",
+      "name": "Tamsin",
+      "tags": [
+        "child",
+        "missing",
+        "victim"
+      ],
+      "full_text": "Tamsin is a little girl from Bramblegate who disappeared at dawn after the door to a house stood wide open and bare footprints led toward the road. Her absence has become a whispered fear among villagers, fueling rumors of the fog-wrapped shrine and voices calling from the trees.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_005"
+    },
+    {
+      "type": "event",
+      "name": "Three nights of bells and whispers",
+      "tags": [
+        "discovery",
+        "occurrence",
+        "investigation"
+      ],
+      "full_text": "For three nights running, a soft bronze bell rings from within the fog and voices whisper in sleepers’ ears. The occurrences coincide with the disappearance of a child and the eerie lights seen between the trees, suggesting a pattern that demands investigation.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_006"
+    },
+    {
+      "type": "worldfact",
+      "name": "The Hollowmere",
+      "tags": [
+        "geography",
+        "magic",
+        "culture"
+      ],
+      "full_text": "The Hollowmere is a fog-shrouded corridor of forest that nuzzles the outskirts of Bramblegate. It is said to be drawn to and from by old rites beneath the shrine, where bells toll without clear hands and will-o’-wisps pull travelers into the blue-lit depths.",
+      "created_turn": 1,
+      "last_updated": 1,
+      "id": "lore_007"
+    }
+  ]
+}

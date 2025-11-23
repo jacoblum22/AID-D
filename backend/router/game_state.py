@@ -229,14 +229,32 @@ class HP(BaseModel):
 
 
 class Stats(BaseModel):
-    """D&D ability scores."""
+    """D&D ability scores and d20 + Domain + Style ratings."""
 
+    # Classic D&D ability scores
     strength: int = 10
     dexterity: int = 10
     constitution: int = 10
     intelligence: int = 10
     wisdom: int = 10
     charisma: int = 10
+
+    # Domain ratings (1-4, determines number of dice to roll)
+    physical: int = 2  # Bodily capability
+    mental: int = 2  # Intellectual power
+    social: int = 2  # Interpersonal effectiveness
+    insight: int = 2  # Perception & intuition
+
+    # Style ratings (as die size: 0, 4, 6, 8)
+    # NOTE: Only ONE style can reach 8 (signature), all others max at 6
+    # New characters start with 0s, experienced characters have mostly 6s
+    forceful: int = 0  # Direct, powerful (0 = untrained default)
+    subtle: int = 0  # Sneaky, hidden (0 = untrained default)
+    precise: int = 0  # Accurate, calculated (0 = untrained default)
+    clever: int = 0  # Inventive, lateral (0 = untrained default)
+    resilient: int = 0  # Enduring, steady (0 = untrained default)
+    graceful: int = 0  # Elegant, flowing (0 = untrained default)
+    chaotic: int = 0  # Wild, unpredictable (0 = untrained default)
 
 
 class BaseEntity(BaseModel):
