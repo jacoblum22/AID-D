@@ -2,7 +2,8 @@
 Test the enhanced lore extraction system with updates, merges, and deletions.
 """
 
-from lore_extractor import process_narration_for_lore, load_lore, reset_world_data
+from test_dm_basic import reset_world_data
+from lore_extractor import process_narration_for_lore, load_lore
 from lore_retrieval import retrieve_relevant_context
 import json
 
@@ -45,7 +46,6 @@ def test_lore_system():
     print(f"✅ Created NPC entry for Gareth (ID: {gareth_entry['id']})")
 
     initial_gareth_text = gareth_entry["full_text"]
-    initial_entry_count = len(lore["entries"])
 
     for entry in lore["entries"]:
         print(f"  - {entry['type'].upper()}: {entry['name']} (ID: {entry['id']})")

@@ -45,7 +45,8 @@ def display_analysis_results(
 
     # Roll details (if decision was roll)
     if analysis["decision"] == "roll" and analysis.get("roll_details"):
-        details = analysis["roll_details"]
+        # roll_details is a list; display the first roll
+        details = analysis["roll_details"][0] if analysis["roll_details"] else {}
         print(f"\n🎯 Roll Details:")
         print(f"   Action: {details.get('action_description', 'N/A')}")
         print(f"   Domain: {details.get('domain', 'N/A').capitalize()}")
@@ -154,7 +155,8 @@ def main():
             and analysis["decision"] == "roll"
             and analysis.get("roll_details")
         ):
-            details = analysis["roll_details"]
+            # roll_details is a list; use the first roll for execution
+            details = analysis["roll_details"][0] if analysis["roll_details"] else {}
             print("🎲 Rolling dice...")
             roll_results = execute_roll(
                 character=character,

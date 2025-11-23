@@ -97,6 +97,7 @@ def save_narration(player_input: str, dm_response: str, turn_number: int):
     """
     # Use file locking to prevent race conditions
     lock_path = LOCK_FILE
+    lock_file = None  # Initialize to None to prevent UnboundLocalError
 
     try:
         # Create/open lock file
@@ -115,12 +116,15 @@ def save_narration(player_input: str, dm_response: str, turn_number: int):
         save_narration_history(history)
 
     finally:
-        # Release lock and close file
-        if sys.platform == "win32":
-            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        lock_file.close()
+        # Release lock and close file (only if successfully opened)
+        if lock_file is not None:
+            try:
+                if sys.platform == "win32":
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            finally:
+                lock_file.close()
 
 
 def get_narrations_range(start_turn: int, end_turn: int) -> List[Dict[str, Any]]:

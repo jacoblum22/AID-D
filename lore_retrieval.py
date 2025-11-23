@@ -7,7 +7,7 @@ Uses tag/keyword matching to find the most relevant context.
 
 import json
 import re
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, Optional
 from openai import OpenAI
 import config
 from lore_extractor import load_lore, load_narration_history

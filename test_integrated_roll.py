@@ -10,9 +10,6 @@ Usage:
     python test_integrated_roll.py
 """
 
-import json
-import os
-import random
 from typing import Optional
 from openai import OpenAI
 import config

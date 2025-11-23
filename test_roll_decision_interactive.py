@@ -9,7 +9,6 @@ Usage:
 """
 
 import json
-import os
 from openai import OpenAI
 import config
 
